@@ -1,0 +1,22 @@
+{
+  "dependencies": {
+    "bun": "^1.2.5",
+    "drizzle-kit": "^0.30.5",
+    "drizzle-orm": "^0.40.0",
+    "hono": "^4.7.4",
+    "oslo": "^1.2.1",
+    "pg": "^8.14.0"
+  },
+  "name": "chatapp",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
