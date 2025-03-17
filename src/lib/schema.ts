@@ -9,6 +9,25 @@ export const users = pgTable("users", {
     createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const passwordCredentialTable = pgTable("password_credentials", {
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    userId: uuid("user_id")
+        .notNull()
+        .unique()
+        .references(() => users.userId, { onDelete: "cascade" }),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const sessionTable = pgTable("sessions", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.userId, { onDelete: "cascade" }),
+    passwordCredentialId: uuid("password_credential_id").references(() => passwordCredentialTable.id, {
+        onDelete: "cascade",
+    }),
+    expiresAt: timestamp("expires_at").notNull(),
+});
+
 export const chats = pgTable("chats", {
     chatId: uuid("chat_id").primaryKey().defaultRandom(),
     creatorId: uuid("creator_id").references(() => users.userId),
@@ -59,23 +78,4 @@ export const messageAttachments = pgTable("message_attachments", {
     filePath: varchar("file_path", { length: 255 }),
     fileType: varchar("file_type", { length: 50 }),
     fileName: varchar("file_name", { length: 255 }),
-});
-
-export const passwordCredentialTable = pgTable("password_credentials", {
-    id: uuid("id").primaryKey().notNull().defaultRandom(),
-    userId: uuid("user_id")
-        .notNull()
-        .unique()
-        .references(() => users.userId, { onDelete: "cascade" }),
-    passwordHash: text("password_hash").notNull(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
-export const sessionTable = pgTable("sessions", {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").references(() => users.userId, { onDelete: "cascade" }),
-    passwordCredentialId: uuid("password_credential_id").references(() => passwordCredentialTable.id, {
-        onDelete: "cascade",
-    }),
-    expiresAt: timestamp("expires_at").notNull(),
 });

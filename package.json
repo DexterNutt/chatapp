@@ -1,11 +1,18 @@
 {
   "dependencies": {
-    "bun": "^1.2.5",
-    "drizzle-kit": "^0.30.5",
-    "drizzle-orm": "^0.40.0",
-    "hono": "^4.7.4",
+    "drizzle-orm": "^0.38.3",
+    "drizzle-zod": "^0.5.1",
+    "hono": "^4.6.16",
+    "hono-openapi": "^0.3.1",
     "oslo": "^1.2.1",
-    "pg": "^8.14.0"
+    "pg": "^8.13.1",
+    "rate-limiter-flexible": "^5.0.4",
+    "redis": "^4.7.0",
+    "sharp": "^0.33.5",
+    "ws": "^8.18.1",
+    "zod": "^3.24.2",
+    "zod-form-data": "^2.0.5",
+    "zod-openapi": "^4.2.3"
   },
   "name": "chatapp",
   "module": "index.ts",
@@ -14,7 +21,8 @@
     "start": "bun run src/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/pg": "^8.11.11"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
