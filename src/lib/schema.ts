@@ -6,6 +6,7 @@ export const messageStatus = pgEnum("message_status", ["sent", "delivered", "rea
 export const users = pgTable("users", {
     userId: uuid("user_id").primaryKey().defaultRandom(),
     email: text("email").unique().notNull(),
+    username: text("username"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
