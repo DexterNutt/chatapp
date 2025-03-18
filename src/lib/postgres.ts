@@ -2,7 +2,7 @@ import pg from "pg";
 
 export const connectToPostgres = async (): Promise<pg.Pool> => {
     const pool = new pg.Pool({
-        host: "127.0.0.1",
+        host: "localhost",
         port: 5432,
         user: "postgres",
         password: "chat-password",
@@ -10,5 +10,6 @@ export const connectToPostgres = async (): Promise<pg.Pool> => {
         keepAlive: true,
     });
 
+    await pool.connect();
     return pool;
 };
