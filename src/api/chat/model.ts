@@ -41,7 +41,6 @@ export const chatParticipantResponseSchema = createSelectSchema(chatParticipants
     .strict();
 
 // Message response
-// Message response
 export type MessageResponse = z.infer<typeof messageResponseSchema>;
 export const messageResponseSchema = createSelectSchema(messages, {
     textContent: (s) => s.textContent.min(1).max(1000),

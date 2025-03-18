@@ -7,7 +7,7 @@ import { AppError } from "./error";
 import { connectToPostgres } from "./postgres";
 import { resolver, validator } from "hono-openapi/zod";
 import type { DescribeRouteOptions } from "hono-openapi";
-import { type AuthContext, type AuthContextParams, AuthService, isAuthContext } from "../api/auth/service";
+import { type AuthContext, type AuthContextParams, AuthService } from "../api/auth/service";
 import { errorWrapperSchema, sseErrorWrapperSchema, createSSEWrapperSchema, type SSEWrapper } from "./zod";
 
 export type AppResponseType = "application/json" | "text/event-stream";

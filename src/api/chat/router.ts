@@ -3,8 +3,6 @@ import { describeRoute } from "hono-openapi";
 import { type CtxEnv, inputValidator, routeResponses, validatedJson } from "../../lib/hono";
 import { ChatService } from "./service";
 import { createChatRequestSchema, sendMessageRequestSchema, chatResponseSchema, messageResponseSchema } from "./model";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-
 export const chatRouter = new Hono<CtxEnv>();
 
 const tags = ["Chat"];

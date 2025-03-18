@@ -80,7 +80,7 @@ export class AuthService {
                 .select({
                     userId: users.userId,
                     passwordHash: passwordCredentialTable.passwordHash,
-                    passwordCredentialId: passwordCredentialTable.id, // Include passwordCredentialId
+                    passwordCredentialId: passwordCredentialTable.id,
                 })
                 .from(users)
                 .innerJoin(passwordCredentialTable, eq(passwordCredentialTable.userId, users.userId))
