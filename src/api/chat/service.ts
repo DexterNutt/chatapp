@@ -8,64 +8,126 @@ import {
     type MessageResponse,
     sendMessageRequestSchema,
 } from "./model";
-import { WebSocketServer, WebSocket } from "ws";
+import type { Context } from "hono";
+import type { CtxEnv } from "../../lib/hono";
+import type { AuthContext } from "../auth/service";
+import { wss, clients } from "../../lib/ws";
+import WebSocket from "ws";
 
 export class ChatService {
-    private static wss: WebSocketServer;
-    private static clients: Map<string, WebSocket> = new Map();
+    static handleConnectionOpen(ws: WebSocket, ctx: Context<CtxEnv>) {
+        const authContext = ctx.get("authContext");
+        if (!authContext) {
+            ws.close(1008, "Unauthorized");
+            return;
+        }
 
-    static initializeWebSocketServer(port: number, db: NodePgDatabase) {
-        if (this.wss) return;
-        this.wss = new WebSocketServer({ port });
+        // Store the user’s WebSocket connection
+        clients.set(authContext.user.id, ws);
+        console.log(`Client connected: ${authContext.user.id}`);
+    }
 
-        this.wss.on("connection", (ws: WebSocket, req) => {
-            const url = req.url;
+    static handleMessage(ws: WebSocket, message: string | Buffer, ctx: Context<CtxEnv>) {
+        try {
+            const { event, data } = JSON.parse(message.toString());
+            const authContext = ctx.get("authContext");
 
-            if (!url) {
-                ws.close();
+            if (!authContext) {
+                ws.send(JSON.stringify({ error: "Unauthorized" }));
                 return;
             }
 
-            const userId = (url.split("/").pop() ?? "").replace(/[^a-fA-F0-9]/g, "");
-
-            if (!userId) {
-                ws.close();
-                return;
+            switch (event) {
+                case "send_message":
+                    this.handleSendMessage(ctx, authContext, data);
+                    break;
+                case "typing_update":
+                    this.handleTypingUpdate(ctx, authContext, data);
+                    break;
+                default:
+                    ws.send(JSON.stringify({ error: "Unknown event type" }));
             }
+        } catch (error) {
+            ws.send(JSON.stringify({ error: "Invalid message format" }));
+        }
+    }
 
-            this.clients.set(userId, ws);
-
-            ws.on("message", async (message) => {
-                try {
-                    const data = typeof message === "string" ? message : message.toString();
-                    const request = JSON.parse(data);
-                    const parsedRequest = sendMessageRequestSchema.safeParse(request);
-                    if (!parsedRequest.success) {
-                        ws.send(JSON.stringify({ error: "Invalid message format" }));
-                        return;
-                    }
-
-                    // Send message using the attached database connection
-                    const chatMessage = await this.sendMessage(db, parsedRequest.data);
-                    ws.send(JSON.stringify(chatMessage));
-                } catch (error) {
-                    console.error("Error processing message:", error);
-                    ws.send(JSON.stringify({ error: "Internal server error" }));
-                }
+    private static async handleSendMessage(ctx: Context<CtxEnv>, authContext: AuthContext, data: any) {
+        try {
+            const validatedData = sendMessageRequestSchema.parse({
+                chatId: data.chatId,
+                senderId: authContext.user.id,
+                content: data.content,
+                replyToMessageId: data.replyToMessageId,
             });
 
-            ws.on("close", () => this.clients.delete(userId));
+            const db = ctx.get("db");
+            const message = await this.sendMessage(db, validatedData);
+
+            this.broadcastToParticipants(db, message.chatId, {
+                event: "new_message",
+                data: message,
+            });
+        } catch (error) {
+            console.error("Error handling message:", error);
+            const client = clients.get(authContext.user.id);
+            if (client) {
+                client.send(
+                    JSON.stringify({
+                        event: "error",
+                        data: { message: "Failed to send message" },
+                    })
+                );
+            }
+        }
+    }
+
+    private static async handleTypingUpdate(ctx: Context<CtxEnv>, authContext: AuthContext, data: any) {
+        try {
+            const { chatId, isTyping } = data;
+            const db = ctx.get("db");
+
+            const participants = await this.getParticipants(db, chatId);
+
+            participants.forEach((userId) => {
+                if (userId !== authContext.user.id) {
+                    const client = clients.get(userId);
+                    if (client) {
+                        client.send(
+                            JSON.stringify({
+                                event: "typing_update",
+                                data: {
+                                    chatId,
+                                    userId: authContext.user.id,
+                                    isTyping,
+                                },
+                            })
+                        );
+                    }
+                }
+            });
+        } catch (error) {
+            console.error("Error handling typing update:", error);
+        }
+    }
+
+    private static async broadcastToParticipants(db: NodePgDatabase, chatId: string, payload: any) {
+        const participants = await this.getParticipants(db, chatId);
+        participants.forEach((userId) => {
+            const client = clients.get(userId);
+            if (client && client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify(payload));
+            }
         });
-
-        console.log(`WebSocket server is running on ws://localhost:${port}`);
     }
 
-    static addConnection(userId: string, ws: WebSocket) {
-        this.clients.set(userId, ws);
-    }
+    private static async getParticipants(db: NodePgDatabase, chatId: string): Promise<string[]> {
+        const result = await db
+            .select({ userId: chatParticipants.userId })
+            .from(chatParticipants)
+            .where(eq(chatParticipants.chatId, chatId));
 
-    static removeConnection(userId: string) {
-        this.clients.delete(userId);
+        return result.map((p) => p.userId);
     }
 
     // Create a new chat
@@ -83,14 +145,6 @@ export class ChatService {
                 roles: userId === creatorId ? ["admin" as const] : ["member" as const],
             }))
         );
-
-        // Map participants for the API response.
-        const participants = participantIds.map((userId) => ({
-            userId,
-            roles: userId === creatorId ? ["admin"] : ["member"],
-            joinedAt: chat.createdAt ?? new Date(),
-            leftAt: undefined,
-        }));
 
         // Build the ChatResponse object.
         const chatResponse: ChatResponse = {
@@ -111,11 +165,9 @@ export class ChatService {
         return chatResponse;
     }
 
-    // Send a message to a chat and broadcast it via WebSocket.
     static async sendMessage(db: NodePgDatabase, request: SendMessageRequest): Promise<MessageResponse> {
         const { chatId, senderId, content, replyToMessageId } = request;
 
-        // Insert the message record.
         const [message] = await db
             .insert(messages)
             .values({
@@ -139,26 +191,12 @@ export class ChatService {
             sentAt: message.sentAt ?? new Date(),
             replyToMessageId: message.replyToMessageId ?? undefined,
             messageStatus: message.messageStatus ?? "sent",
-            userId: "",
-            textContent: null,
-            deletedAt: null,
-            editedAt: null,
-            attachments: [],
+            userId: message.userId,
+            textContent: message.textContent,
+            deletedAt: message.deletedAt,
+            editedAt: message.editedAt,
+            attachments: [], // Assuming no attachments by default
         };
-
-        // Fetch participants for the given chat
-        const participants = await db
-            .select({ userId: chatParticipants.userId })
-            .from(chatParticipants)
-            .where(eq(chatParticipants.chatId, chatId));
-
-        // Broadcast the message to all connected participants
-        for (const participant of participants) {
-            const connection = this.clients.get(participant.userId);
-            if (connection) {
-                connection.send(JSON.stringify(mappedMessage));
-            }
-        }
 
         return mappedMessage;
     }
