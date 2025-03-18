@@ -3,6 +3,7 @@
   "workspaces": {
     "": {
       "dependencies": {
+        "@hono/swagger-ui": "^0.5.1",
         "drizzle-orm": "^0.38.3",
         "drizzle-zod": "^0.5.1",
         "hono": "^4.6.16",
@@ -40,6 +41,8 @@
     "@hono/arktype-validator": ["@hono/arktype-validator@2.0.0", "", { "peerDependencies": { "arktype": "^2.0.0-dev.14", "hono": "*" } }, "sha512-ICNZrK6Qcw6gyPfW53ONXI4JomRcks0fQhqzn9EWsfr6nlL6BNXQ96vIgVDU8qimcbJ2m3GJFAqgzOvWbZk3jw=="],
 
     "@hono/effect-validator": ["@hono/effect-validator@1.2.0", "", { "peerDependencies": { "effect": ">=3.10.0", "hono": ">=4.4.13" } }, "sha512-PJTTVsF3bN/ld7w3g3rcWRzhbgn2wG4CcAtZpgGAz90DF3TLD5ByVkkRI3SK0HnbtPQKT2Ndng+bJvLwV1lZZQ=="],
+
+    "@hono/swagger-ui": ["@hono/swagger-ui@0.5.1", "", { "peerDependencies": { "hono": "*" } }, "sha512-XpUCfszLJ9b1rtFdzqOSHfdg9pfBiC2J5piEjuSanYpDDTIwpMz0ciiv5N3WWUaQpz9fEgH8lttQqL41vIFuDA=="],
 
     "@hono/typebox-validator": ["@hono/typebox-validator@0.2.6", "", { "peerDependencies": { "@sinclair/typebox": ">=0.31.15 <1", "hono": ">=3.9.0" } }, "sha512-x+Q7RWiw6rJmJs7MDgtvRbS7ViXXEzqimC0duY4or7y1f89f5Z3KCQSdUSVka+Uv0HZ/O0ZNt+ixNDxfJLi4hA=="],
 

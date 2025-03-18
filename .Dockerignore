@@ -1,0 +1,8 @@
+.svelte-kit
+.vscode
+env/
+dist
+node_modules
+.prettierrc
+buildspec.yml
+eslint.config.js
