@@ -18,11 +18,6 @@ interface MessageData {
     replyToMessageId?: string;
 }
 
-interface TypingUpdateData {
-    chatId: string;
-    isTyping: boolean;
-}
-
 export class ChatService {
     static async createChat(db: NodePgDatabase, request: CreateChatRequest): Promise<ChatResponse> {
         const now = new Date();
@@ -81,25 +76,6 @@ export class ChatService {
         this.broadcastToParticipants(db, message.chatId, {
             event: "new_message",
             data: message,
-        });
-    }
-
-    static async handleWebSocketTypingUpdate(db: NodePgDatabase, authContext: AuthContext, data: TypingUpdateData) {
-        const { chatId, isTyping } = data;
-        const participants = await this.getParticipants(db, chatId);
-
-        participants.forEach((userId) => {
-            if (userId !== authContext.user.id) {
-                const client = clients.get(userId);
-                if (client && client.readyState === WebSocket.OPEN) {
-                    client.send(
-                        JSON.stringify({
-                            event: "typing_update",
-                            data: { chatId, userId: authContext.user.id, isTyping },
-                        })
-                    );
-                }
-            }
         });
     }
 

@@ -52,9 +52,6 @@ export function initializeWebSocketServer(db: NodePgDatabase, wss: WebSocketServ
                     case "send_message":
                         await ChatService.handleWebSocketMessage(db, authContext, data);
                         break;
-                    case "typing_update":
-                        await ChatService.handleWebSocketTypingUpdate(db, authContext, data);
-                        break;
                     default:
                         ws.send(JSON.stringify({ error: "Unknown event type" }));
                 }
@@ -68,7 +65,7 @@ export function initializeWebSocketServer(db: NodePgDatabase, wss: WebSocketServ
             clients.delete(userId);
         });
     });
-    wss.on("error", (err) => console.error("⚠️ WebSocket error:", err));
+    wss.on("error", (err) => console.error("WebSocket error:", err));
 }
 
 startWebSocketServer();
