@@ -102,7 +102,7 @@ export class AuthService {
 
             const session = await this.createSession(db, {
                 userId: user.userId,
-                passwordCredentialId: user.passwordCredentialId, // Use the fetched passwordCredentialId
+                passwordCredentialId: user.passwordCredentialId,
             });
 
             return { sessionToken: session.id };
@@ -143,7 +143,7 @@ export class AuthService {
             .values({
                 userId: opts.userId,
                 passwordCredentialId: opts.passwordCredentialId,
-                expiresAt: new Date(Date.now() + sessionExpiryMs), // 30 days
+                expiresAt: new Date(Date.now() + sessionExpiryMs),
             })
             .returning()
             .then((res) => res[0]);
