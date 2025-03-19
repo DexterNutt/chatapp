@@ -1,24 +1,75 @@
 import WebSocket, { WebSocketServer } from "ws";
+import { ChatService } from "../api/chat/service";
+import { AuthService } from "../api/auth/service";
+import { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { connectToPostgres } from "./postgres";
 
-const wss = new WebSocketServer({ port: 3001 });
-const clients = new Map<string, WebSocket>();
+const websocketPort = 3001;
 
-wss.on("connection", (ws) => {
-    console.log("New WebSocket connection established");
+export const wss = new WebSocketServer({ port: websocketPort });
+export const clients = new Map<string, WebSocket>();
 
-    ws.on("message", (message) => {
-        console.log("Received:", message.toString());
-    });
+async function startWebSocketServer() {
+    const pool = await connectToPostgres();
+    const db = drizzle(pool);
+    initializeWebSocketServer(db, wss);
+    console.log(`WebSocket server running on ${websocketPort}`);
+}
 
-    ws.on("close", () => {
-        console.log("Client disconnected");
-        for (const [userId, client] of clients.entries()) {
-            if (client === ws) {
-                clients.delete(userId);
-                break;
-            }
+export function initializeWebSocketServer(db: NodePgDatabase, wss: WebSocketServer) {
+    wss.on("connection", async (ws, req) => {
+        console.log("Connection attempt received");
+
+        const url = new URL(req.url ?? "", `ws://${req.headers.host}`);
+        const sessionToken = url.searchParams.get("sessionToken");
+
+        if (!sessionToken) {
+            ws.close(1008, "Unauthorized: Missing session token");
+            return;
         }
-    });
-});
 
-export { wss, clients };
+        let authContext;
+        try {
+            authContext = await AuthService.createAuthContext(db, { sessionToken });
+            console.log("Authentication successful for user:", authContext.user.id);
+        } catch (error) {
+            console.error("Authentication failed:", error);
+            ws.close(1008, "Unauthorized: Invalid session");
+            return;
+        }
+
+        const userId = authContext.user.id;
+        clients.set(userId, ws);
+
+        console.log(`Client connected: ${userId}`);
+
+        ws.on("message", async (message) => {
+            console.log("Received:", message.toString());
+            try {
+                const { event, data } = JSON.parse(message.toString());
+                switch (event) {
+                    case "send_message":
+                        await ChatService.handleWebSocketMessage(db, authContext, data);
+                        break;
+                    case "typing_update":
+                        await ChatService.handleWebSocketTypingUpdate(db, authContext, data);
+                        break;
+                    default:
+                        ws.send(JSON.stringify({ error: "Unknown event type" }));
+                }
+            } catch (error) {
+                ws.send(JSON.stringify({ error }));
+                // ws.send(JSON.stringify({ error: "Invalid message format" }));
+            }
+        });
+
+        ws.on("close", () => {
+            console.log(`Client disconnected: ${userId}`);
+            clients.delete(userId);
+        });
+    });
+    wss.on("error", (err) => console.error("⚠️ WebSocket error:", err));
+}
+
+startWebSocketServer();
