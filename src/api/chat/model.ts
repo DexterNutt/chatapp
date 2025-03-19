@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { createSelectSchema } from "drizzle-zod";
-import { chats, chatParticipants, messages, messageAttachments } from "../../lib/schema";
+import { chats, chatParticipants, messages } from "../../lib/schema";
 
-// Create a new chat request
 export type CreateChatRequest = z.infer<typeof createChatRequestSchema>;
 export const createChatRequestSchema = z
     .object({
@@ -15,7 +14,6 @@ export const createChatRequestSchema = z
     })
     .strict();
 
-// Send message request
 export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
 export const sendMessageRequestSchema = z.object({
     chatId: z.string().uuid(),
@@ -24,7 +22,6 @@ export const sendMessageRequestSchema = z.object({
     replyToMessageId: z.string().uuid().nullable().optional(),
 });
 
-// Chat Participant response
 export const chatParticipantResponseSchema = createSelectSchema(chatParticipants, {
     roles: z.enum(["admin", "member"]).array(),
     joinedAt: z.coerce.date(),
@@ -38,7 +35,6 @@ export const chatParticipantResponseSchema = createSelectSchema(chatParticipants
     })
     .strict();
 
-// Message response
 export type MessageResponse = z.infer<typeof messageResponseSchema>;
 export const messageResponseSchema = createSelectSchema(messages, {
     textContent: (s) => s.textContent.min(1).max(1000),
@@ -64,7 +60,6 @@ export const messageResponseSchema = createSelectSchema(messages, {
     })
     .strict();
 
-// Chat response
 export type ChatResponse = z.infer<typeof chatResponseSchema>;
 export const chatResponseSchema = createSelectSchema(chats, {
     createdAt: z.coerce.date(),

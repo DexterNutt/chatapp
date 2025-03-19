@@ -59,8 +59,7 @@ export function initializeWebSocketServer(db: NodePgDatabase, wss: WebSocketServ
                         ws.send(JSON.stringify({ error: "Unknown event type" }));
                 }
             } catch (error) {
-                ws.send(JSON.stringify({ error }));
-                // ws.send(JSON.stringify({ error: "Invalid message format" }));
+                ws.send(JSON.stringify({ error: "Invalid message format" }));
             }
         });
 

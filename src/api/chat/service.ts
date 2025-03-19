@@ -27,7 +27,6 @@ export class ChatService {
     static async createChat(db: NodePgDatabase, request: CreateChatRequest): Promise<ChatResponse> {
         const now = new Date();
 
-        // Insert new chat
         const [chat] = await db
             .insert(chats)
             .values({
@@ -41,7 +40,6 @@ export class ChatService {
         const chatId = chat.chatId;
         const participantIds = Array.from(new Set([request.creatorId, ...request.participantIds]));
 
-        // Insert participants
         const participants = participantIds.map((userId) => ({
             chatId,
             userId,
@@ -55,7 +53,6 @@ export class ChatService {
 
         await db.insert(chatParticipants).values(participants);
 
-        // Return updated response structure
         return {
             chatId,
             creatorId: request.creatorId,

@@ -8,7 +8,6 @@ export const authRouter = new Hono<CtxEnv>();
 
 const tags = ["Auth"];
 
-// Sign-In Route
 authRouter.post(
     "/sign-in",
     inputValidator("json", signInRequestSchema),
@@ -20,7 +19,6 @@ authRouter.post(
     async (c) => validatedJson(c, authTokensSchema, await AuthService.signIn(c.var.db, c.req.valid("json")))
 );
 
-// Sign-Up Route
 authRouter.post(
     "/sign-up",
     inputValidator("json", signUpRequestSchema),

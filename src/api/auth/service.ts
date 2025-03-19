@@ -71,7 +71,6 @@ export class AuthService {
         });
     }
 
-    // Sign In
     static async signIn(db: NodePgDatabase, signInRequest: SignInRequest): Promise<AuthTokens> {
         return db.transaction(async (db) => {
             const { email, password } = signInRequest;
@@ -109,7 +108,6 @@ export class AuthService {
         });
     }
 
-    //Create user
     static async createUser(
         db: NodePgDatabase,
         opts: {
@@ -130,7 +128,6 @@ export class AuthService {
         });
     }
 
-    // Create Session
     static async createSession(
         db: NodePgDatabase,
         opts: {
@@ -149,7 +146,6 @@ export class AuthService {
             .then((res) => res[0]);
     }
 
-    // Password management
     static async forceSetPassword(
         db: NodePgDatabase,
         opts: {

@@ -21,8 +21,6 @@ export const signUpRequestSchema = z
             .email()
             .transform((value) => value.toLowerCase()),
         password: signInRequestSchema.shape.password.min(6).max(128),
-        suppressDomainCheck: z.boolean().nullish(),
-        suppressVerificationEmail: z.boolean().nullish(),
     })
     .strict();
 

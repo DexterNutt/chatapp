@@ -7,7 +7,6 @@ export const chatRouter = new Hono<CtxEnv>();
 
 const tags = ["Chat"];
 
-// Create Chat Route
 chatRouter.post(
     "/create",
     inputValidator("json", createChatRequestSchema),
@@ -19,7 +18,6 @@ chatRouter.post(
     async (c) => validatedJson(c, chatResponseSchema, await ChatService.createChat(c.var.db, c.req.valid("json")))
 );
 
-// Send Message Route
 chatRouter.post(
     "/send-message",
     inputValidator("json", sendMessageRequestSchema),
