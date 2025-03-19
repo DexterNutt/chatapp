@@ -17,14 +17,12 @@ export const createChatRequestSchema = z
 
 // Send message request
 export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
-export const sendMessageRequestSchema = z
-    .object({
-        chatId: z.string().uuid(),
-        senderId: z.string().uuid(),
-        content: z.string().min(1).max(1000),
-        replyToMessageId: z.string().uuid().optional(),
-    })
-    .strict();
+export const sendMessageRequestSchema = z.object({
+    chatId: z.string().uuid(),
+    senderId: z.string().uuid(),
+    content: z.string().min(1, "Message cannot be empty"),
+    replyToMessageId: z.string().uuid().nullable().optional(),
+});
 
 // Chat Participant response
 export const chatParticipantResponseSchema = createSelectSchema(chatParticipants, {
