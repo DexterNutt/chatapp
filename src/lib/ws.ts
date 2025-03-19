@@ -45,9 +45,9 @@ export function initializeWebSocketServer(db: NodePgDatabase, wss: WebSocketServ
         console.log(`Client connected: ${userId}`);
 
         ws.on("message", async (message) => {
-            console.log("Received:", message.toString());
+            const { event, data } = JSON.parse(message.toString());
+            console.log("Message:", data.content);
             try {
-                const { event, data } = JSON.parse(message.toString());
                 switch (event) {
                     case "send_message":
                         await ChatService.handleWebSocketMessage(db, authContext, data);
