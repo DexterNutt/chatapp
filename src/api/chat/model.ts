@@ -22,6 +22,7 @@ export const sendMessageRequestSchema = z.object({
     replyToMessageId: z.string().uuid().nullable().optional(),
 });
 
+export type chatParticipantResponse = z.infer<typeof chatParticipantResponseSchema>;
 export const chatParticipantResponseSchema = createSelectSchema(chatParticipants, {
     roles: z.enum(["admin", "member"]).array(),
     joinedAt: z.coerce.date(),
@@ -68,6 +69,6 @@ export const chatResponseSchema = createSelectSchema(chats, {
     .extend({
         participants: z.array(chatParticipantResponseSchema),
         messages: z.array(messageResponseSchema),
-        name: z.string().optional(),
+        name: z.string().optional().nullable(),
     })
     .strict();

@@ -53,6 +53,8 @@ export function initializeWebSocketServer(db: NodePgDatabase, wss: WebSocketServ
                     case "send_message":
                         await ChatService.handleWebSocketMessage(db, authContext, data);
                         break;
+                    // case"typing"
+
                     default:
                         ws.send(JSON.stringify({ error: "Unknown event type" }));
                 }
