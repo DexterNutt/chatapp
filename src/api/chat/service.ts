@@ -1,11 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { eq, sql, and, inArray, count } from "drizzle-orm";
 import { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { chats, chatParticipants, messages, messageAttachments } from "../../lib/schema";
+import { chats, chatParticipants, messages, messageAttachments, chatParticipantRoles } from "../../lib/schema";
 import {
     sendMessageRequestSchema,
     type Chat,
-    type ChatResponse,
     type CreateChatRequest,
     type MessageResponse,
     type SendMessageRequest,
@@ -24,18 +23,19 @@ export class ChatService {
     static async createChat(db: NodePgDatabase, request: CreateChatRequest): Promise<Chat> {
         const now = new Date();
 
-        // Step 0: Find unique participants
         const participantIds = [...new Set([request.creatorId, ...request.participantIds])];
         const participantCount = participantIds.length;
 
+        if (participantCount < 2) {
+            throw new AppError("BAD_REQUEST", "Chat must have at least 2 participants.");
+        }
+
         try {
-            // Step 1: Check if a chat already exists with the same participants
             const existingChat = await this.findExistingChat(db, participantIds);
             if (existingChat) {
-                return existingChat;
+                throw new AppError("BAD_REQUEST", `Chat already exists.${existingChat.chatId}`);
             }
 
-            // Step 2: Create a new chat if no existing chat is found
             return await this.createNewChat(db, request, participantIds, now);
         } catch (error) {
             console.error("Error in createChat:", error);
@@ -44,53 +44,119 @@ export class ChatService {
     }
 
     private static async findExistingChat(db: NodePgDatabase, participantIds: string[]): Promise<Chat | null> {
-        const participantCount = participantIds.length;
+        try {
+            const participantCount = participantIds.length;
 
-        const existingChat = await db
-            .select({ chatId: chatParticipants.chatId })
-            .from(chatParticipants)
-            .where(inArray(chatParticipants.userId, participantIds))
-            .groupBy(chatParticipants.chatId)
-            .having(eq(count(), participantCount))
-            .limit(1);
+            // Find chat IDs where exactly those participants are members
+            const chatIdsQuery = await db
+                .select({
+                    chatId: chatParticipants.chatId,
+                    participantCount: count(chatParticipants.userId).as("participant_count"),
+                })
+                .from(chatParticipants)
+                .where(inArray(chatParticipants.userId, participantIds))
+                .groupBy(chatParticipants.chatId);
 
-        if (existingChat.length === 0) {
+            const exactMatchChats = chatIdsQuery.filter((row) => row.participantCount === participantCount);
+
+            if (exactMatchChats.length === 0) {
+                return null;
+            }
+
+            // Now verify each chat has exactly these participants and no others
+            for (const chat of exactMatchChats) {
+                const allParticipants = await db
+                    .select({ userId: chatParticipants.userId })
+                    .from(chatParticipants)
+                    .where(eq(chatParticipants.chatId, chat.chatId));
+
+                const chatParticipantIds = allParticipants.map((p) => p.userId);
+
+                // Check if the sets of participants are identical
+                if (
+                    chatParticipantIds.length === participantIds.length &&
+                    chatParticipantIds.every((id) => participantIds.includes(id))
+                ) {
+                    return await this.fetchChatDetails(db, chat.chatId);
+                }
+            }
+
             return null;
+        } catch (error) {
+            console.error("Error finding existing chat:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to find existing chat.");
         }
-
-        return await this.fetchChatDetails(db, existingChat[0].chatId);
     }
 
     private static async fetchChatDetails(db: NodePgDatabase, chatId: string): Promise<Chat | null> {
-        const result = await db
-            .select({
-                chat: chats,
-                participant: chatParticipants,
-                message: messages,
-            })
-            .from(chats)
-            .leftJoin(chatParticipants, eq(chats.chatId, chatParticipants.chatId))
-            .leftJoin(messages, eq(chats.chatId, messages.chatId))
-            .where(eq(chats.chatId, chatId));
+        try {
+            const result = await db
+                .select({
+                    chat: chats,
+                })
+                .from(chats)
+                .where(eq(chats.chatId, chatId))
+                .limit(1);
 
-        if (result.length === 0) return null;
+            if (result.length === 0 || !result[0].chat) return null;
 
-        const chat = result[0]?.chat;
+            const chat = result[0].chat;
 
-        if (!chat) return null;
+            if (!chat) return null;
 
-        const fetchedMessages = this.getMessages(db, chat.chatId);
-        const fetchedParticipants = this.getParticipants(db, chat.chatId);
+            const fetchedMessages = await this.getMessages(db, chat.chatId);
+            const participantIds = await this.getParticipants(db, chat.chatId);
 
-        return {
-            chatId: chat.chatId,
-            creatorId: chat.creatorId,
-            name: chat.name,
-            createdAt: chat.createdAt,
-            lastActivity: chat.lastActivity,
-            messages: fetchedMessages
-            participants: fetchedParticipants
-        };
+            return {
+                chatId: chat.chatId,
+                creatorId: chat.creatorId,
+                name: chat.name,
+                createdAt: chat.createdAt,
+                lastActivity: chat.lastActivity,
+                messages: fetchedMessages,
+                participants: participantIds,
+            };
+        } catch (error) {
+            console.error("Error fetching chat details:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch chat details.");
+        }
+    }
+
+    private static async getParticipants(db: NodePgDatabase, chatId: string): Promise<string[]> {
+        try {
+            const participants = await db
+                .select({ userId: chatParticipants.userId })
+                .from(chatParticipants)
+                .where(eq(chatParticipants.chatId, chatId));
+            return participants.map((p) => p.userId);
+        } catch (error) {
+            console.error("Error fetching participants:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch participants.");
+        }
+    }
+
+    private static async getMessages(db: NodePgDatabase, chatId: string): Promise<MessageResponse[]> {
+        try {
+            const fetchedMessages = await db
+                .select({ message: messages })
+                .from(messages)
+                .where(eq(messages.chatId, chatId));
+
+            // Map the fetched messages into MessageResponse format
+            const chatMessages: MessageResponse[] = fetchedMessages.map((row) => ({
+                chatId: row.message.chatId,
+                messageId: row.message.messageId,
+                userId: row.message.userId,
+                textContent: row.message.textContent ?? "",
+                senderId: row.message.userId,
+                content: row.message.textContent ?? "",
+                attachments: [],
+            }));
+            return chatMessages;
+        } catch (error) {
+            console.error("Error fetching messages:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch messages.");
+        }
     }
 
     private static async createNewChat(
@@ -99,39 +165,48 @@ export class ChatService {
         participantIds: string[],
         now: Date
     ): Promise<Chat> {
-        return await db.transaction(async (tx) => {
-            const [newChat] = await tx
-                .insert(chats)
-                .values({
+        try {
+            return await db.transaction(async (tx) => {
+                const [newChat] = await tx
+                    .insert(chats)
+                    .values({
+                        creatorId: request.creatorId,
+                        name: request.name ?? null,
+                        createdAt: now,
+                        lastActivity: now,
+                    })
+                    .returning();
+
+                const chatId = newChat.chatId;
+
+                // Create participant records for the database
+                const participantRecords = participantIds.map((userId) => ({
+                    chatId,
+                    userId,
+                    roles:
+                        userId === request.creatorId
+                            ? [chatParticipantRoles.enumValues[0]]
+                            : [chatParticipantRoles.enumValues[1]],
+                    joinedAt: now,
+                }));
+
+                // Insert the participant records
+                await tx.insert(chatParticipants).values(participantRecords);
+
+                return {
+                    chatId,
                     creatorId: request.creatorId,
-                    name: request.name ?? null,
+                    name: request.name,
                     createdAt: now,
                     lastActivity: now,
-                })
-                .returning();
-
-            const chatId = newChat.chatId;
-
-            const participants = participantIds.map((userId) => ({
-                chatId,
-                userId,
-                roles: userId === request.creatorId ? ["admin"] : ["member"],
-                joinedAt: now,
-                leftAt: null,
-            }));
-
-            await tx.insert(chatParticipants).values(participants);
-
-            return {
-                chatId,
-                creatorId: request.creatorId,
-                name: request.name,
-                createdAt: now,
-                lastActivity: now,
-                messages: [],
-                participants,
-            };
-        });
+                    messages: [],
+                    participants: participantIds,
+                };
+            });
+        } catch (error) {
+            console.error("Error creating new chat:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to create new chat.");
+        }
     }
 
     static async handleWebSocketMessage(db: NodePgDatabase, authContext: AuthContext, data: MessageData) {
@@ -159,65 +234,47 @@ export class ChatService {
         });
     }
 
-    private static async getParticipants(db: NodePgDatabase, chatId: string): Promise<string[]> {
-        const result = await db
-            .select({ userId: chatParticipants.userId })
-            .from(chatParticipants)
-            .where(eq(chatParticipants.chatId, chatId));
-        return result.map((p) => p.userId);
-    }
-
     static async sendMessage(db: NodePgDatabase, request: SendMessageRequest): Promise<MessageResponse> {
-        const { chatId, senderId, content, replyToMessageId } = request;
+        const { chatId, senderId, content } = request;
 
-        //Use user from auth context
+        try {
+            // Check if sender is a participant in the chat
+            const participantCheck = await db
+                .select({ userId: chatParticipants.userId })
+                .from(chatParticipants)
+                .where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, senderId)));
 
-        //Check if chat ID exists
-        //check if senderId is participant
-        //Then send msg
+            if (participantCheck.length === 0) {
+                throw new AppError("FORBIDDEN", "User is not a participant in this chat.");
+            }
 
-        const [message] = await db
-            .insert(messages)
-            .values({
-                chatId,
-                userId: senderId,
-                textContent: content,
-            })
-            .returning();
+            return await db.transaction(async (tx) => {
+                const [message] = await tx
+                    .insert(messages)
+                    .values({
+                        chatId,
+                        userId: senderId,
+                        textContent: content,
+                    })
+                    .returning();
 
-        await db.update(chats).set({ lastActivity: new Date() }).where(eq(chats.chatId, chatId));
+                await tx.update(chats).set({ lastActivity: new Date() }).where(eq(chats.chatId, chatId));
 
-        // Make transaction dependent between message and last activity
+                const mappedMessage: MessageResponse = {
+                    messageId: message.messageId,
+                    chatId: message.chatId,
+                    senderId: message.userId,
+                    content: message.textContent ?? "",
+                    userId: message.userId,
+                    textContent: message.textContent,
+                    attachments: [],
+                };
 
-        const mappedMessage: MessageResponse = {
-            messageId: message.messageId,
-            chatId: message.chatId,
-            senderId: message.userId,
-            content: message.textContent ?? "",
-            userId: message.userId,
-            textContent: message.textContent,
-            attachments: [],
-        };
-
-        return mappedMessage;
-    }
-
-    private static async getMessages(db: NodePgDatabase, chatId: string): Promise<MessageResponse[]> {
-        const fetchedMessages = await db
-            .select({ message: messages })
-            .from(messages)
-            .where(eq(messages.chatId, chatId));
-
-        // Map the fetched messages into MessageResponse format
-        const chatMessages: MessageResponse[] = fetchedMessages.map((row) => ({
-            chatId: row.message.chatId, // Accessing chatId from the nested message object
-            messageId: row.message.messageId, // Accessing messageId from the nested message object
-            userId: row.message.userId, // Accessing userId from the nested message object
-            textContent: row.message.textContent ?? "", // Accessing textContent from the nested message object
-            senderId: row.message.userId,
-            content: row.message.textContent ?? "", // Content is the same as textContent
-            attachments: [],
-        }));
-        return chatMessages;
+                return mappedMessage;
+            });
+        } catch (error) {
+            console.error("Error sending message:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to send message.");
+        }
     }
 }
