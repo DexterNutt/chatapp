@@ -1,16 +1,16 @@
 import { z } from "zod";
 import { createSelectSchema } from "drizzle-zod";
-import { chats, chatParticipants, messages } from "../../lib/schema";
+import { chats, chatParticipants, messages, messageAttachments } from "../../lib/schema";
 
-export type CreateChatRequest = z.infer<typeof createChatRequestSchema>;
-export const createChatRequestSchema = z
-    .object({
-        creatorId: z.string().uuid(),
-        participantIds: z
-            .array(z.string().uuid())
-            .min(2, { message: "At least 2 participants required" })
-            .max(2, { message: "At most 2 participants allowed" }),
-        name: z.string().optional(),
+export type fetchChatParticipant = z.infer<typeof fetchChatParticipantSchema>;
+export const fetchChatParticipantSchema = createSelectSchema(chatParticipants, {
+    roles: z.enum(["admin", "member"]).array(),
+    joinedAt: z.coerce.date(),
+})
+    .pick({
+        userId: true,
+        roles: true,
+        joinedAt: true,
     })
     .strict();
 
@@ -22,25 +22,9 @@ export const sendMessageRequestSchema = z.object({
     replyToMessageId: z.string().uuid().nullable().optional(),
 });
 
-export type chatParticipantResponse = z.infer<typeof chatParticipantResponseSchema>;
-export const chatParticipantResponseSchema = createSelectSchema(chatParticipants, {
-    roles: z.enum(["admin", "member"]).array(),
-    joinedAt: z.coerce.date(),
-    leftAt: z.coerce.date().optional(),
-})
-    .pick({
-        userId: true,
-        roles: true,
-        joinedAt: true,
-        leftAt: true,
-    })
-    .strict();
-
 export type MessageResponse = z.infer<typeof messageResponseSchema>;
 export const messageResponseSchema = createSelectSchema(messages, {
     textContent: (s) => s.textContent.min(1).max(1000),
-    sentAt: z.coerce.date(),
-    messageStatus: z.enum(["sent", "delivered", "read", "deleted"]),
 })
     .extend({
         messageId: z.string().uuid(),
@@ -61,13 +45,33 @@ export const messageResponseSchema = createSelectSchema(messages, {
     })
     .strict();
 
-export type ChatResponse = z.infer<typeof chatResponseSchema>;
-export const chatResponseSchema = createSelectSchema(chats, {
+export type FetchMessageAttachment = z.infer<typeof fetchMessageAttachmentsSchema>;
+export const fetchMessageAttachmentsSchema = createSelectSchema(messageAttachments, {
+    filePath: z.string(),
+    fileType: z.string(),
+    fileName: z.string(),
+})
+    .extend({
+        attachmentId: z.string().uuid(),
+        messageId: z.string().uuid(),
+    })
+    .strict();
+
+export type CreateChatRequest = z.infer<typeof createChatSchema>;
+export const createChatSchema = z.object({
+    participantIds: z.array(z.string().uuid()).min(2),
+    creatorId: z.string().uuid(),
+    name: z.string().optional(),
+});
+
+export type Chat = z.infer<typeof chatSchema>;
+export const chatSchema = createSelectSchema(chats, {
+    chatId: z.string(),
     createdAt: z.coerce.date(),
     lastActivity: z.coerce.date(),
 })
     .extend({
-        participants: z.array(chatParticipantResponseSchema),
+        participants: z.array(fetchChatParticipantSchema),
         messages: z.array(messageResponseSchema),
         name: z.string().optional().nullable(),
     })

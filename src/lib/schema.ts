@@ -1,7 +1,6 @@
 import { pgTable, uuid, varchar, timestamp, pgEnum, type AnyPgColumn, primaryKey, text } from "drizzle-orm/pg-core";
 
 export const chatParticipantRoles = pgEnum("user_role", ["admin", "member"]);
-export const messageStatus = pgEnum("message_status", ["sent", "delivered", "read", "deleted"]);
 
 export const users = pgTable("users", {
     userId: uuid("user_id").primaryKey().defaultRandom(),
@@ -48,7 +47,6 @@ export const chatParticipants = pgTable(
             .references(() => users.userId, { onDelete: "cascade" }),
         roles: chatParticipantRoles("roles").array().notNull(),
         joinedAt: timestamp("joined_at").notNull().defaultNow(),
-        leftAt: timestamp("left_at"),
     },
     (t) => ({
         pk: primaryKey({ columns: [t.chatId, t.userId] }),
@@ -63,14 +61,7 @@ export const messages = pgTable("messages", {
     userId: uuid("user_id")
         .notNull()
         .references(() => users.userId, { onDelete: "set null" }),
-    replyToMessageId: uuid("reply_to_message_id").references((): AnyPgColumn => messages.messageId, {
-        onDelete: "set null",
-    }),
-    messageStatus: messageStatus("message_status"),
     textContent: text("text_content"),
-    sentAt: timestamp("sent_at").notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at"),
-    editedAt: timestamp("edited_at"),
 });
 
 export const messageAttachments = pgTable("message_attachments", {

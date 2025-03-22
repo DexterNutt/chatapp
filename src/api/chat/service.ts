@@ -1,9 +1,10 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { eq, sql, and, inArray } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { chats, chatParticipants, messages } from "../../lib/schema";
+import { eq, sql, and, inArray, count } from "drizzle-orm";
+import { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { chats, chatParticipants, messages, messageAttachments } from "../../lib/schema";
 import {
     sendMessageRequestSchema,
+    type Chat,
     type ChatResponse,
     type CreateChatRequest,
     type MessageResponse,
@@ -11,7 +12,7 @@ import {
 } from "./model";
 import type { AuthContext } from "../auth/service";
 import { clients } from "../../lib/ws";
-import { array } from "zod";
+import { AppError } from "../../lib/error";
 
 interface MessageData {
     chatId: string;
@@ -20,62 +21,86 @@ interface MessageData {
 }
 
 export class ChatService {
-    static async createChat(db: NodePgDatabase, request: CreateChatRequest): Promise<ChatResponse> {
+    static async createChat(db: NodePgDatabase, request: CreateChatRequest): Promise<Chat> {
         const now = new Date();
 
-        //Step 0: find participants
+        // Step 0: Find unique participants
         const participantIds = [...new Set([request.creatorId, ...request.participantIds])];
         const participantCount = participantIds.length;
 
-        //Step 1: Check if chat already exists with the same participants
+        try {
+            // Step 1: Check if a chat already exists with the same participants
+            const existingChat = await this.findExistingChat(db, participantIds);
+            if (existingChat) {
+                return existingChat;
+            }
+
+            // Step 2: Create a new chat if no existing chat is found
+            return await this.createNewChat(db, request, participantIds, now);
+        } catch (error) {
+            console.error("Error in createChat:", error);
+            throw new AppError("BAD_REQUEST", "Failed to create chat.");
+        }
+    }
+
+    private static async findExistingChat(db: NodePgDatabase, participantIds: string[]): Promise<Chat | null> {
+        const participantCount = participantIds.length;
+
         const existingChat = await db
             .select({ chatId: chatParticipants.chatId })
             .from(chatParticipants)
+            .where(inArray(chatParticipants.userId, participantIds))
             .groupBy(chatParticipants.chatId)
-            .having(({ and, eq, count, sql }) =>
-                and(
-                    eq(count(), participantCount),
-                    eq(
-                        sql`sum(case when ${chatParticipants.userId} in ${participantIds} then 1 else 0 end)`,
-                        participantCount
-                    )
-                )
-            )
+            .having(eq(count(), participantCount))
             .limit(1);
 
-        if (existingChat[0]) {
-            const { chatId } = existingChat[0];
-            const [chat, participants] = await Promise.all([
-                db
-                    .select()
-                    .from(chats)
-                    .where(eq(chats.chatId, chatId))
-                    .then((res) => res[0]),
-                db.select().from(chatParticipants).where(eq(chatParticipants.chatId, chatId)),
-            ]);
-
-            return {
-                ...chat,
-                messages: messages.map((m) => ({
-                    ...m,
-                    content: m.textContent ?? "",
-                    senderId: m.userId,
-                    replyToMessageId: m.replyToMessageId ?? undefined,
-                    messageStatus: m.messageStatus ?? "sent",
-                    attachments: [],
-                })),
-                participants: participants.map((p) => ({
-                    userId: p.userId,
-                    roles: p.roles,
-                    joinedAt: p.joinedAt,
-                    leftAt: p.leftAt,
-                })),
-            };
+        if (existingChat.length === 0) {
+            return null;
         }
 
-        //Step 2: Create a new chat
-        const [newChat] = await db.transaction(async (tx) => {
-            await tx
+        return await this.fetchChatDetails(db, existingChat[0].chatId);
+    }
+
+    private static async fetchChatDetails(db: NodePgDatabase, chatId: string): Promise<Chat | null> {
+        const result = await db
+            .select({
+                chat: chats,
+                participant: chatParticipants,
+                message: messages,
+            })
+            .from(chats)
+            .leftJoin(chatParticipants, eq(chats.chatId, chatParticipants.chatId))
+            .leftJoin(messages, eq(chats.chatId, messages.chatId))
+            .where(eq(chats.chatId, chatId));
+
+        if (result.length === 0) return null;
+
+        const chat = result[0]?.chat;
+
+        if (!chat) return null;
+
+        const fetchedMessages = this.getMessages(db, chat.chatId);
+        const fetchedParticipants = this.getParticipants(db, chat.chatId);
+
+        return {
+            chatId: chat.chatId,
+            creatorId: chat.creatorId,
+            name: chat.name,
+            createdAt: chat.createdAt,
+            lastActivity: chat.lastActivity,
+            messages: fetchedMessages
+            participants: fetchedParticipants
+        };
+    }
+
+    private static async createNewChat(
+        db: NodePgDatabase,
+        request: CreateChatRequest,
+        participantIds: string[],
+        now: Date
+    ): Promise<Chat> {
+        return await db.transaction(async (tx) => {
+            const [newChat] = await tx
                 .insert(chats)
                 .values({
                     creatorId: request.creatorId,
@@ -84,36 +109,29 @@ export class ChatService {
                     lastActivity: now,
                 })
                 .returning();
-            await tx.insert(chatParticipants);
+
+            const chatId = newChat.chatId;
+
+            const participants = participantIds.map((userId) => ({
+                chatId,
+                userId,
+                roles: userId === request.creatorId ? ["admin"] : ["member"],
+                joinedAt: now,
+                leftAt: null,
+            }));
+
+            await tx.insert(chatParticipants).values(participants);
+
+            return {
+                chatId,
+                creatorId: request.creatorId,
+                name: request.name,
+                createdAt: now,
+                lastActivity: now,
+                messages: [],
+                participants,
+            };
         });
-
-        const newChatId = newChat.chatId;
-
-        const participants = participantIds.map((userId) => ({
-            newChatId,
-            userId,
-            roles:
-                userId === request.creatorId
-                    ? (["admin"] as ("admin" | "member")[])
-                    : (["member"] as ("admin" | "member")[]),
-            joinedAt: now,
-            leftAt: null,
-        }));
-
-        return {
-            chatId: newChatId,
-            creatorId: request.creatorId,
-            name: request.name,
-            createdAt: now,
-            lastActivity: now,
-            messages: [],
-            participants: participants.map((p) => ({
-                userId: p.userId,
-                roles: p.roles,
-                joinedAt: p.joinedAt,
-                leftAt: p.leftAt,
-            })),
-        };
     }
 
     static async handleWebSocketMessage(db: NodePgDatabase, authContext: AuthContext, data: MessageData) {
@@ -164,8 +182,6 @@ export class ChatService {
                 chatId,
                 userId: senderId,
                 textContent: content,
-                replyToMessageId,
-                messageStatus: "sent",
             })
             .returning();
 
@@ -178,16 +194,30 @@ export class ChatService {
             chatId: message.chatId,
             senderId: message.userId,
             content: message.textContent ?? "",
-            sentAt: message.sentAt ?? new Date(),
-            replyToMessageId: message.replyToMessageId ?? undefined,
-            messageStatus: message.messageStatus ?? "sent",
             userId: message.userId,
             textContent: message.textContent,
-            deletedAt: message.deletedAt,
-            editedAt: message.editedAt,
             attachments: [],
         };
 
         return mappedMessage;
+    }
+
+    private static async getMessages(db: NodePgDatabase, chatId: string): Promise<MessageResponse[]> {
+        const fetchedMessages = await db
+            .select({ message: messages })
+            .from(messages)
+            .where(eq(messages.chatId, chatId));
+
+        // Map the fetched messages into MessageResponse format
+        const chatMessages: MessageResponse[] = fetchedMessages.map((row) => ({
+            chatId: row.message.chatId, // Accessing chatId from the nested message object
+            messageId: row.message.messageId, // Accessing messageId from the nested message object
+            userId: row.message.userId, // Accessing userId from the nested message object
+            textContent: row.message.textContent ?? "", // Accessing textContent from the nested message object
+            senderId: row.message.userId,
+            content: row.message.textContent ?? "", // Content is the same as textContent
+            attachments: [],
+        }));
+        return chatMessages;
     }
 }
