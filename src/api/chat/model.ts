@@ -1,20 +1,20 @@
 import { z } from "zod";
 import { createSelectSchema } from "drizzle-zod";
-import { chats, chatParticipants, messages, messageAttachments } from "../../lib/schema";
+import { chats, messages, messageAttachments } from "../../lib/schema";
 
 export type FetchChatParticipant = z.infer<typeof fetchChatParticipantSchema>;
 export const fetchChatParticipantSchema = z.string().uuid();
 
-export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
-export const sendMessageRequestSchema = z.object({
+export type sendMessage = z.infer<typeof sendMessageSchema>;
+export const sendMessageSchema = z.object({
     chatId: z.string().uuid(),
     senderId: z.string().uuid(),
     content: z.string().min(1, "Message cannot be empty"),
     replyToMessageId: z.string().uuid().nullable().optional(),
 });
 
-export type MessageResponse = z.infer<typeof messageResponseSchema>;
-export const messageResponseSchema = createSelectSchema(messages, {
+export type Message = z.infer<typeof messageSchema>;
+export const messageSchema = createSelectSchema(messages, {
     textContent: (s) => s.textContent.min(1).max(1000),
 })
     .extend({
@@ -48,8 +48,8 @@ export const fetchMessageAttachmentsSchema = createSelectSchema(messageAttachmen
     })
     .strict();
 
-export type CreateChatRequest = z.infer<typeof createChatRequestSchema>;
-export const createChatRequestSchema = z.object({
+export type CreateChat = z.infer<typeof createChatSchema>;
+export const createChatSchema = z.object({
     participantIds: z.array(z.string().uuid()).min(2),
     creatorId: z.string().uuid(),
     name: z.string().optional(),
@@ -63,7 +63,7 @@ export const chatSchema = createSelectSchema(chats, {
 })
     .extend({
         participants: z.array(z.string().uuid()),
-        messages: z.array(messageResponseSchema),
+        messages: z.array(messageSchema),
         name: z.string().optional().nullable(),
     })
     .strict();

@@ -2,13 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { eq, sql, and, inArray, count } from "drizzle-orm";
 import { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { chats, chatParticipants, messages, messageAttachments, chatParticipantRoles } from "../../lib/schema";
-import {
-    sendMessageRequestSchema,
-    type Chat,
-    type CreateChatRequest,
-    type MessageResponse,
-    type SendMessageRequest,
-} from "./model";
+import { sendMessageSchema, type Chat, type CreateChat, type Message, type sendMessage } from "./model";
 import type { AuthContext } from "../auth/service";
 import { clients } from "../../lib/ws";
 import { AppError } from "../../lib/error";
@@ -20,7 +14,7 @@ interface MessageData {
 }
 
 export class ChatService {
-    static async createChat(db: NodePgDatabase, request: CreateChatRequest): Promise<Chat> {
+    static async createChat(db: NodePgDatabase, request: CreateChat): Promise<Chat> {
         const now = new Date();
 
         const participantIds = [...new Set([request.creatorId, ...request.participantIds])];
@@ -135,7 +129,7 @@ export class ChatService {
         }
     }
 
-    private static async getMessages(db: NodePgDatabase, chatId: string): Promise<MessageResponse[]> {
+    private static async getMessages(db: NodePgDatabase, chatId: string): Promise<Message[]> {
         try {
             const fetchedMessages = await db
                 .select({ message: messages })
@@ -143,7 +137,7 @@ export class ChatService {
                 .where(eq(messages.chatId, chatId));
 
             // Map the fetched messages into MessageResponse format
-            const chatMessages: MessageResponse[] = fetchedMessages.map((row) => ({
+            const chatMessages: Message[] = fetchedMessages.map((row) => ({
                 chatId: row.message.chatId,
                 messageId: row.message.messageId,
                 userId: row.message.userId,
@@ -161,7 +155,7 @@ export class ChatService {
 
     private static async createNewChat(
         db: NodePgDatabase,
-        request: CreateChatRequest,
+        request: CreateChat,
         participantIds: string[],
         now: Date
     ): Promise<Chat> {
@@ -210,7 +204,7 @@ export class ChatService {
     }
 
     static async handleWebSocketMessage(db: NodePgDatabase, authContext: AuthContext, data: MessageData) {
-        const validatedData = sendMessageRequestSchema.parse({
+        const validatedData = sendMessageSchema.parse({
             chatId: data.chatId,
             senderId: authContext.user.id,
             content: data.content,
@@ -234,7 +228,7 @@ export class ChatService {
         });
     }
 
-    static async sendMessage(db: NodePgDatabase, request: SendMessageRequest): Promise<MessageResponse> {
+    static async sendMessage(db: NodePgDatabase, request: sendMessage): Promise<Message> {
         const { chatId, senderId, content } = request;
 
         try {
@@ -260,7 +254,7 @@ export class ChatService {
 
                 await tx.update(chats).set({ lastActivity: new Date() }).where(eq(chats.chatId, chatId));
 
-                const mappedMessage: MessageResponse = {
+                const mappedMessage: Message = {
                     messageId: message.messageId,
                     chatId: message.chatId,
                     senderId: message.userId,

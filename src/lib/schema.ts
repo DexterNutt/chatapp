@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, timestamp, pgEnum, type AnyPgColumn, primaryKey, text } from "drizzle-orm/pg-core";
+import { pgTable, primaryKey, uuid, varchar, timestamp, pgEnum, text } from "drizzle-orm/pg-core";
 
 export const chatParticipantRoles = pgEnum("user_role", ["admin", "member"]);
 
