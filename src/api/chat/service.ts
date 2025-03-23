@@ -1,8 +1,8 @@
-import { eq, sql, and, inArray, count } from "drizzle-orm";
+import { eq, and, inArray, count } from "drizzle-orm";
 import { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { chats, chatParticipants, messages, messageAttachments, chatParticipantRoles } from "../../lib/schema";
 import { sendMessageSchema, type Chat, type CreateChat, type Message, type sendMessage } from "./model";
-import { AuthService, type AuthContext } from "../auth/service";
+import { type AuthContext } from "../auth/service";
 import { AppError } from "../../lib/error";
 import { clients } from "./router";
 
