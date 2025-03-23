@@ -1,11 +1,10 @@
-import { WebSocketServer, WebSocket } from "ws";
 import { eq, sql, and, inArray, count } from "drizzle-orm";
 import { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { chats, chatParticipants, messages, messageAttachments, chatParticipantRoles } from "../../lib/schema";
 import { sendMessageSchema, type Chat, type CreateChat, type Message, type sendMessage } from "./model";
-import type { AuthContext } from "../auth/service";
-import { clients } from "../../lib/ws";
+import { AuthService, type AuthContext } from "../auth/service";
 import { AppError } from "../../lib/error";
+import { clients } from "./router";
 
 interface MessageData {
     chatId: string;
@@ -187,6 +186,20 @@ export class ChatService {
                 // Insert the participant records
                 await tx.insert(chatParticipants).values(participantRecords);
 
+                // Notify all participants about the new chat
+                const chatCreatedEvent = {
+                    event: "chat_created",
+                    data: {
+                        chatId,
+                        creatorId: request.creatorId,
+                        name: request.name,
+                        participants: participantIds,
+                        createdAt: now,
+                    },
+                };
+
+                this.notifyParticipants(participantIds, chatCreatedEvent);
+
                 return {
                     chatId,
                     creatorId: request.creatorId,
@@ -201,31 +214,6 @@ export class ChatService {
             console.error("Error creating new chat:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to create new chat.");
         }
-    }
-
-    static async handleWebSocketMessage(db: NodePgDatabase, authContext: AuthContext, data: MessageData) {
-        const validatedData = sendMessageSchema.parse({
-            chatId: data.chatId,
-            senderId: authContext.user.id,
-            content: data.content,
-            replyToMessageId: data.replyToMessageId,
-        });
-
-        const message = await this.sendMessage(db, validatedData);
-        this.broadcastToParticipants(db, message.chatId, {
-            event: "new_message",
-            data: message,
-        });
-    }
-
-    private static async broadcastToParticipants(db: NodePgDatabase, chatId: string, payload: any) {
-        const participants = await this.getParticipants(db, chatId);
-        participants.forEach((userId) => {
-            const client = clients.get(userId);
-            if (client && client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify(payload));
-            }
-        });
     }
 
     static async sendMessage(db: NodePgDatabase, request: sendMessage): Promise<Message> {
@@ -264,11 +252,42 @@ export class ChatService {
                     attachments: [],
                 };
 
+                // Broadcast the message to all participants
+                await this.broadcastToParticipants(db, message.chatId, {
+                    event: "new_message",
+                    data: mappedMessage,
+                });
                 return mappedMessage;
             });
         } catch (error) {
             console.error("Error sending message:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to send message.");
         }
+    }
+
+    //*Websocket Handlers
+    static async handleWebSocketMessage(db: NodePgDatabase, authContext: AuthContext, data: MessageData) {
+        const validatedData = sendMessageSchema.parse({
+            chatId: data.chatId,
+            senderId: authContext.user.id,
+            content: data.content,
+        });
+        await this.sendMessage(db, validatedData);
+    }
+
+    private static async broadcastToParticipants(db: NodePgDatabase, chatId: string, payload: any) {
+        const participants = await this.getParticipants(db, chatId);
+        this.notifyParticipants(participants, payload);
+    }
+
+    private static notifyParticipants(participantIds: string[], payload: any) {
+        const payloadString = JSON.stringify(payload);
+
+        participantIds.forEach((userId) => {
+            const client = clients.get(userId);
+            if (client && client.readyState === 1) {
+                client.send(payloadString);
+            }
+        });
     }
 }
