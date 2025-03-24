@@ -1,4 +1,4 @@
-import { pgTable, primaryKey, uuid, varchar, timestamp, pgEnum, text } from "drizzle-orm/pg-core";
+import { pgTable, primaryKey, uuid, varchar, timestamp, pgEnum, text, integer } from "drizzle-orm/pg-core";
 
 export const chatParticipantRoles = pgEnum("user_role", ["admin", "member"]);
 
@@ -65,9 +65,13 @@ export const messages = pgTable("messages", {
 });
 
 export const messageAttachments = pgTable("message_attachments", {
-    attachmentId: uuid("attachment_id").primaryKey(),
-    messageId: uuid("message_id").references(() => messages.messageId),
-    filePath: varchar("file_path", { length: 255 }),
-    fileType: varchar("file_type", { length: 50 }),
-    fileName: varchar("file_name", { length: 255 }),
+    attachmentId: uuid("attachment_id").defaultRandom().primaryKey(),
+    messageId: uuid("message_id")
+        .references(() => messages.messageId)
+        .notNull(),
+    fileName: text("file_name").notNull(),
+    fileSize: integer("file_size").notNull(),
+    mimeType: text("mime_type").notNull(),
+    storagePath: text("storage_path").notNull(),
+    uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
 });

@@ -11,7 +11,30 @@ export const sendMessageSchema = z.object({
     senderId: z.string().uuid(),
     content: z.string().min(1, "Message cannot be empty"),
     replyToMessageId: z.string().uuid().nullable().optional(),
+    attachments: z
+        .array(
+            z.object({
+                filename: z.string(),
+                contentType: z.string(),
+                data: z.string(),
+            })
+        )
+        .optional(),
 });
+
+export type MessageAttachment = z.infer<typeof messageAttachmentSchema>;
+export const messageAttachmentSchema = createSelectSchema(messageAttachments, {
+    fileName: z.string(),
+    mimeType: z.string(),
+    fileSize: z.number(),
+    storagePath: z.string(),
+})
+    .extend({
+        attachmentId: z.string().uuid(),
+        messageId: z.string().uuid(),
+        url: z.string().optional(),
+    })
+    .strict();
 
 export type Message = z.infer<typeof messageSchema>;
 export const messageSchema = createSelectSchema(messages, {
@@ -23,28 +46,20 @@ export const messageSchema = createSelectSchema(messages, {
         senderId: z.string().uuid(),
         content: z.string(),
         replyToMessageId: z.string().uuid().nullish(),
-        attachments: z
-            .array(
-                z.object({
-                    attachmentId: z.string().uuid(),
-                    filePath: z.string(),
-                    fileType: z.string(),
-                    fileName: z.string(),
-                })
-            )
-            .optional(),
+        attachments: z.array(messageAttachmentSchema).optional(),
     })
     .strict();
 
 export type FetchMessageAttachment = z.infer<typeof fetchMessageAttachmentsSchema>;
 export const fetchMessageAttachmentsSchema = createSelectSchema(messageAttachments, {
-    filePath: z.string(),
-    fileType: z.string(),
+    storagePath: z.string(),
+    mimeType: z.string(),
     fileName: z.string(),
 })
     .extend({
         attachmentId: z.string().uuid(),
         messageId: z.string().uuid(),
+        url: z.string().optional(),
     })
     .strict();
 

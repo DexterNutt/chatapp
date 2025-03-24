@@ -1,15 +1,30 @@
 import { eq, and, inArray, count } from "drizzle-orm";
 import { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { chats, chatParticipants, messages, messageAttachments, chatParticipantRoles } from "../../lib/schema";
-import { sendMessageSchema, type Chat, type CreateChat, type Message, type sendMessage } from "./model";
+import {
+    sendMessageSchema,
+    type Chat,
+    type CreateChat,
+    type Message,
+    type sendMessage,
+    type MessageAttachment,
+} from "./model";
 import { type AuthContext } from "../auth/service";
 import { AppError } from "../../lib/error";
 import { clients } from "./router";
+import { minioClient, BUCKET_NAME } from "../../lib/minio";
+import * as crypto from "crypto";
+import * as path from "path";
 
 interface MessageData {
     chatId: string;
     content: string;
     replyToMessageId?: string;
+    attachments?: Array<{
+        filename: string;
+        contentType: string;
+        data: string;
+    }>;
 }
 
 export class ChatService {
@@ -128,30 +143,6 @@ export class ChatService {
         }
     }
 
-    private static async getMessages(db: NodePgDatabase, chatId: string): Promise<Message[]> {
-        try {
-            const fetchedMessages = await db
-                .select({ message: messages })
-                .from(messages)
-                .where(eq(messages.chatId, chatId));
-
-            // Map the fetched messages into MessageResponse format
-            const chatMessages: Message[] = fetchedMessages.map((row) => ({
-                chatId: row.message.chatId,
-                messageId: row.message.messageId,
-                userId: row.message.userId,
-                textContent: row.message.textContent ?? "",
-                senderId: row.message.userId,
-                content: row.message.textContent ?? "",
-                attachments: [],
-            }));
-            return chatMessages;
-        } catch (error) {
-            console.error("Error fetching messages:", error);
-            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch messages.");
-        }
-    }
-
     private static async createNewChat(
         db: NodePgDatabase,
         request: CreateChat,
@@ -217,7 +208,7 @@ export class ChatService {
     }
 
     static async sendMessage(db: NodePgDatabase, request: sendMessage): Promise<Message> {
-        const { chatId, senderId, content } = request;
+        const { chatId, senderId, content, attachments } = request;
 
         try {
             // Check if sender is a participant in the chat
@@ -225,12 +216,12 @@ export class ChatService {
                 .select({ userId: chatParticipants.userId })
                 .from(chatParticipants)
                 .where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, senderId)));
-
             if (participantCheck.length === 0) {
                 throw new AppError("FORBIDDEN", "User is not a participant in this chat.");
             }
 
             return await db.transaction(async (tx) => {
+                // Insert the message
                 const [message] = await tx
                     .insert(messages)
                     .values({
@@ -240,6 +231,45 @@ export class ChatService {
                     })
                     .returning();
 
+                // Handle attachments if any
+                const messageAttachmentRecords: MessageAttachment[] = [];
+                if (attachments && attachments.length > 0) {
+                    for (const attachment of attachments) {
+                        const uploadedAttachment = await this.uploadAttachment(
+                            message.messageId,
+                            attachment.filename,
+                            attachment.contentType,
+                            attachment.data
+                        );
+
+                        // Insert attachment record
+                        const [attachmentRecord] = await tx
+                            .insert(messageAttachments)
+                            .values({
+                                messageId: message.messageId,
+                                fileName: uploadedAttachment.fileName,
+                                fileSize: uploadedAttachment.fileSize,
+                                mimeType: uploadedAttachment.mimeType,
+                                storagePath: uploadedAttachment.storagePath,
+                                uploadedAt: new Date(),
+                            })
+                            .returning();
+
+                        // Generate a URL for the attachment
+                        const url = await this.getAttachmentUrl(attachmentRecord.storagePath);
+
+                        messageAttachmentRecords.push({
+                            attachmentId: attachmentRecord.attachmentId,
+                            messageId: attachmentRecord.messageId,
+                            fileName: attachmentRecord.fileName,
+                            fileSize: attachmentRecord.fileSize,
+                            mimeType: attachmentRecord.mimeType,
+                            storagePath: attachmentRecord.storagePath,
+                            url: url,
+                            uploadedAt: new Date(),
+                        });
+                    }
+                }
                 await tx.update(chats).set({ lastActivity: new Date() }).where(eq(chats.chatId, chatId));
 
                 const mappedMessage: Message = {
@@ -249,7 +279,7 @@ export class ChatService {
                     content: message.textContent ?? "",
                     userId: message.userId,
                     textContent: message.textContent,
-                    attachments: [],
+                    attachments: messageAttachmentRecords,
                 };
 
                 // Broadcast the message to all participants
@@ -257,6 +287,7 @@ export class ChatService {
                     event: "new_message",
                     data: mappedMessage,
                 });
+
                 return mappedMessage;
             });
         } catch (error) {
@@ -264,14 +295,128 @@ export class ChatService {
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to send message.");
         }
     }
+    //? Handle message attachments
+    static async uploadAttachment(
+        messageId: string,
+        filename: string,
+        contentType: string,
+        base64Data: string
+    ): Promise<{
+        fileName: string;
+        fileSize: number;
+        mimeType: string;
+        storagePath: string;
+    }> {
+        try {
+            // Generate a unique filename to prevent collisions
+            const fileExtension = path.extname(filename);
+            const uniqueFilename = `${crypto.randomBytes(8).toString("hex")}-${Date.now()}${fileExtension}`;
+
+            // Create storage path in format: messageId/uniqueFilename
+            const storagePath = `${messageId}/${uniqueFilename}`;
+
+            // Convert base64 to buffer
+            const buffer = Buffer.from(base64Data.split(",")[1], "base64");
+            const fileSize = buffer.length;
+
+            // Upload to MinIO
+            await minioClient.putObject(BUCKET_NAME, storagePath, buffer, buffer.length, {
+                "Content-Type": contentType,
+            });
+
+            return {
+                fileName: filename,
+                fileSize,
+                mimeType: contentType,
+                storagePath,
+            };
+        } catch (error) {
+            console.error("Error uploading attachment:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to upload attachment.");
+        }
+    }
+
+    static async getAttachmentUrl(storagePath: string): Promise<string> {
+        try {
+            const url = await minioClient.presignedGetObject(BUCKET_NAME, storagePath, 24 * 60 * 60);
+            return url;
+        } catch (error) {
+            console.error("Error generating attachment URL:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to generate attachment URL.");
+        }
+    }
+
+    static async getMessageAttachments(db: NodePgDatabase, messageId: string): Promise<MessageAttachment[]> {
+        try {
+            const attachmentRecords = await db
+                .select()
+                .from(messageAttachments)
+                .where(eq(messageAttachments.messageId, messageId));
+
+            // Map to return format with presigned URLs
+            const attachments = await Promise.all(
+                attachmentRecords.map(async (record) => ({
+                    attachmentId: record.attachmentId,
+                    messageId: record.messageId,
+                    fileName: record.fileName,
+                    fileSize: record.fileSize,
+                    mimeType: record.mimeType,
+                    storagePath: record.storagePath,
+                    url: await this.getAttachmentUrl(record.storagePath),
+                    uploadedAt: record.uploadedAt,
+                }))
+            );
+
+            return attachments;
+        } catch (error) {
+            console.error("Error fetching message attachments:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch message attachments.");
+        }
+    }
+
+    private static async getMessages(db: NodePgDatabase, chatId: string): Promise<Message[]> {
+        try {
+            const fetchedMessages = await db
+                .select({ message: messages })
+                .from(messages)
+                .where(eq(messages.chatId, chatId));
+
+            // Map the fetched messages into Message format
+            const chatMessages: Message[] = [];
+
+            for (const row of fetchedMessages) {
+                // Fetch attachments for each message
+                const attachments = await this.getMessageAttachments(db, row.message.messageId);
+
+                chatMessages.push({
+                    chatId: row.message.chatId,
+                    messageId: row.message.messageId,
+                    userId: row.message.userId,
+                    senderId: row.message.userId,
+                    textContent: row.message.textContent,
+                    content: row.message.textContent ?? "",
+                    attachments: attachments,
+                });
+            }
+
+            return chatMessages;
+        } catch (error) {
+            console.error("Error fetching messages:", error);
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch messages.");
+        }
+    }
 
     //*Websocket Handlers
     static async handleWebSocketMessage(db: NodePgDatabase, authContext: AuthContext, data: MessageData) {
+        // Update to include attachments
         const validatedData = sendMessageSchema.parse({
             chatId: data.chatId,
             senderId: authContext.user.id,
             content: data.content,
+            replyToMessageId: data.replyToMessageId,
+            attachments: data.attachments || [],
         });
+
         await this.sendMessage(db, validatedData);
     }
 
