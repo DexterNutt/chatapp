@@ -6,3 +6,4 @@ isolated-data
 .npmrc
 .env
 drizzle
+minio-data
