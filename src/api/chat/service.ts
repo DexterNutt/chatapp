@@ -15,6 +15,7 @@ import { clients } from "./router";
 import { minioClient, BUCKET_NAME } from "../../lib/minio";
 import * as crypto from "crypto";
 import * as path from "path";
+import type { ServerWebSocket } from "bun";
 
 interface MessageData {
     chatId: string;
@@ -209,7 +210,7 @@ export class ChatService {
 
     static async sendMessage(db: NodePgDatabase, request: sendMessage): Promise<Message> {
         const { chatId, senderId, content, attachments } = request;
-
+        const now = new Date();
         try {
             // Check if sender is a participant in the chat
             const participantCheck = await db
@@ -251,7 +252,7 @@ export class ChatService {
                                 fileSize: uploadedAttachment.fileSize,
                                 mimeType: uploadedAttachment.mimeType,
                                 storagePath: uploadedAttachment.storagePath,
-                                uploadedAt: new Date(),
+                                uploadedAt: now,
                             })
                             .returning();
 
@@ -266,11 +267,11 @@ export class ChatService {
                             mimeType: attachmentRecord.mimeType,
                             storagePath: attachmentRecord.storagePath,
                             url: url,
-                            uploadedAt: new Date(),
+                            uploadedAt: now,
                         });
                     }
                 }
-                await tx.update(chats).set({ lastActivity: new Date() }).where(eq(chats.chatId, chatId));
+                await tx.update(chats).set({ lastActivity: now }).where(eq(chats.chatId, chatId));
 
                 const mappedMessage: Message = {
                     messageId: message.messageId,
@@ -295,7 +296,8 @@ export class ChatService {
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to send message.");
         }
     }
-    //? Handle message attachments
+
+    //* Handle message attachments
     static async uploadAttachment(
         messageId: string,
         filename: string,
@@ -353,7 +355,6 @@ export class ChatService {
                 .from(messageAttachments)
                 .where(eq(messageAttachments.messageId, messageId));
 
-            // Map to return format with presigned URLs
             const attachments = await Promise.all(
                 attachmentRecords.map(async (record) => ({
                     attachmentId: record.attachmentId,
@@ -381,11 +382,9 @@ export class ChatService {
                 .from(messages)
                 .where(eq(messages.chatId, chatId));
 
-            // Map the fetched messages into Message format
             const chatMessages: Message[] = [];
 
             for (const row of fetchedMessages) {
-                // Fetch attachments for each message
                 const attachments = await this.getMessageAttachments(db, row.message.messageId);
 
                 chatMessages.push({
@@ -408,7 +407,6 @@ export class ChatService {
 
     //*Websocket Handlers
     static async handleWebSocketMessage(db: NodePgDatabase, authContext: AuthContext, data: MessageData) {
-        // Update to include attachments
         const validatedData = sendMessageSchema.parse({
             chatId: data.chatId,
             senderId: authContext.user.id,

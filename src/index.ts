@@ -4,6 +4,8 @@ import { AppError } from "./lib/error";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { errorWrapperSchema } from "./lib/zod";
+import { createBunWebSocket } from "hono/bun";
+import type { WSEvents } from "hono/ws";
 
 export const app = new Hono();
 
@@ -12,6 +14,8 @@ const port = process.env["APP_PORT"];
 app.get("/", (c) => c.text("Server is running 🚀"));
 
 app.route("/api", apiRouter);
+
+const { websocket } = createBunWebSocket();
 
 app.onError(async (err, c) => {
     console.error(c.req.method, c.req.url, err);
@@ -47,4 +51,5 @@ export default {
     fetch: app.fetch,
     idleTimeout: 0,
     port,
+    websocket: websocket,
 };
