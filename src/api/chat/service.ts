@@ -1,4 +1,4 @@
-import { eq, and, inArray, count } from "drizzle-orm";
+import { eq, and, inArray, count, sql } from "drizzle-orm";
 import { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { chats, chatParticipants, messages, messageAttachments, chatParticipantRoles } from "../../lib/schema";
 import {
@@ -55,34 +55,28 @@ export class ChatService {
         try {
             const participantCount = participantIds.length;
 
-            const chatIdsQuery = await db
-                .select({
-                    chatId: chatParticipants.chatId,
-                    participantCount: count(chatParticipants.userId).as("participant_count"),
-                })
+            const potentialChats = await db
+                .select({ chatId: chatParticipants.chatId })
                 .from(chatParticipants)
                 .where(inArray(chatParticipants.userId, participantIds))
-                .groupBy(chatParticipants.chatId);
+                .groupBy(chatParticipants.chatId)
+                .having(sql`count(${chatParticipants.userId}) = ${participantCount}`);
 
-            const exactMatchChats = chatIdsQuery.filter((row) => row.participantCount === participantCount);
-
-            if (exactMatchChats.length === 0) {
-                return null;
-            }
-
-            for (const chat of exactMatchChats) {
-                const allParticipants = await db
-                    .select({ userId: chatParticipants.userId })
+            for (const { chatId } of potentialChats) {
+                const participants = await db
+                    .select({
+                        userId: chatParticipants.userId,
+                    })
                     .from(chatParticipants)
-                    .where(eq(chatParticipants.chatId, chat.chatId));
+                    .where(eq(chatParticipants.chatId, chatId));
 
-                const chatParticipantIds = allParticipants.map((p) => p.userId);
+                const chatParticipantIds = participants.map((p) => p.userId);
 
                 if (
                     chatParticipantIds.length === participantIds.length &&
                     chatParticipantIds.every((id) => participantIds.includes(id))
                 ) {
-                    return await this.fetchChatDetails(db, chat.chatId);
+                    return await this.fetchChatDetails(db, chatId);
                 }
             }
 
