@@ -14,8 +14,8 @@ export const sendMessageSchema = z.object({
     attachments: z
         .array(
             z.object({
-                filename: z.string(),
-                contentType: z.string(),
+                filename: z.string().min(1, "Filename cannot be empty").max(255, "Filename is too long"),
+                contentType: z.string().regex(/^[a-z]+\/[a-z0-9\-+.]+$/i, "Invalid content type"),
                 data: z.string(),
             })
         )
@@ -24,9 +24,12 @@ export const sendMessageSchema = z.object({
 
 export type MessageAttachment = z.infer<typeof messageAttachmentSchema>;
 export const messageAttachmentSchema = createSelectSchema(messageAttachments, {
-    fileName: z.string(),
-    mimeType: z.string(),
-    fileSize: z.number(),
+    fileName: z.string().min(1).max(255),
+    mimeType: z.string().regex(/^[a-z]+\/[a-z0-9\-+.]+$/i),
+    fileSize: z
+        .number()
+        .min(0)
+        .max(5 * 1024 * 1024),
     storagePath: z.string(),
 })
     .extend({
