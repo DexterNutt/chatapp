@@ -15,7 +15,6 @@ import { clients } from "./router";
 import { minioClient, BUCKET_NAME } from "../../lib/minio";
 import * as crypto from "crypto";
 import * as path from "path";
-import type { ServerWebSocket } from "bun";
 
 interface MessageData {
     chatId: string;
@@ -56,7 +55,6 @@ export class ChatService {
         try {
             const participantCount = participantIds.length;
 
-            // Find chat IDs where exactly those participants are members
             const chatIdsQuery = await db
                 .select({
                     chatId: chatParticipants.chatId,
@@ -72,7 +70,6 @@ export class ChatService {
                 return null;
             }
 
-            // Now verify each chat has exactly these participants and no others
             for (const chat of exactMatchChats) {
                 const allParticipants = await db
                     .select({ userId: chatParticipants.userId })
@@ -81,7 +78,6 @@ export class ChatService {
 
                 const chatParticipantIds = allParticipants.map((p) => p.userId);
 
-                // Check if the sets of participants are identical
                 if (
                     chatParticipantIds.length === participantIds.length &&
                     chatParticipantIds.every((id) => participantIds.includes(id))
@@ -164,7 +160,6 @@ export class ChatService {
 
                 const chatId = newChat.chatId;
 
-                // Create participant records for the database
                 const participantRecords = participantIds.map((userId) => ({
                     chatId,
                     userId,
@@ -175,10 +170,8 @@ export class ChatService {
                     joinedAt: now,
                 }));
 
-                // Insert the participant records
                 await tx.insert(chatParticipants).values(participantRecords);
 
-                // Notify all participants about the new chat
                 const chatCreatedEvent = {
                     event: "chat_created",
                     data: {
@@ -212,7 +205,6 @@ export class ChatService {
         const { chatId, senderId, content, attachments } = request;
         const now = new Date();
         try {
-            // Check if sender is a participant in the chat
             const participantCheck = await db
                 .select({ userId: chatParticipants.userId })
                 .from(chatParticipants)
@@ -222,7 +214,6 @@ export class ChatService {
             }
 
             return await db.transaction(async (tx) => {
-                // Insert the message
                 const [message] = await tx
                     .insert(messages)
                     .values({
@@ -232,7 +223,6 @@ export class ChatService {
                     })
                     .returning();
 
-                // Handle attachments if any
                 const messageAttachmentRecords: MessageAttachment[] = [];
                 if (attachments && attachments.length > 0) {
                     for (const attachment of attachments) {
@@ -243,7 +233,6 @@ export class ChatService {
                             attachment.data
                         );
 
-                        // Insert attachment record
                         const [attachmentRecord] = await tx
                             .insert(messageAttachments)
                             .values({
@@ -256,7 +245,6 @@ export class ChatService {
                             })
                             .returning();
 
-                        // Generate a URL for the attachment
                         const url = await this.getAttachmentUrl(attachmentRecord.storagePath);
 
                         messageAttachmentRecords.push({
@@ -283,7 +271,6 @@ export class ChatService {
                     attachments: messageAttachmentRecords,
                 };
 
-                // Broadcast the message to all participants
                 await this.broadcastToParticipants(db, message.chatId, {
                     event: "new_message",
                     data: mappedMessage,
@@ -310,18 +297,25 @@ export class ChatService {
         storagePath: string;
     }> {
         try {
-            // Generate a unique filename to prevent collisions
             const fileExtension = path.extname(filename);
             const uniqueFilename = `${crypto.randomBytes(8).toString("hex")}-${Date.now()}${fileExtension}`;
-
-            // Create storage path in format: messageId/uniqueFilename
             const storagePath = `${messageId}/${uniqueFilename}`;
 
-            // Convert base64 to buffer
-            const buffer = Buffer.from(base64Data.split(",")[1], "base64");
+            let dataPart = base64Data;
+            if (base64Data.includes(",")) {
+                dataPart = base64Data.split(",")[1];
+            }
+            if (!/^[A-Za-z0-9+/=]*$/.test(dataPart)) {
+                throw new AppError("BAD_REQUEST", "Invalid base64 data format");
+            }
+
+            const buffer = Buffer.from(dataPart, "base64");
             const fileSize = buffer.length;
 
-            // Upload to MinIO
+            if (fileSize === 0) {
+                throw new AppError("BAD_REQUEST", "Empty file data");
+            }
+
             await minioClient.putObject(BUCKET_NAME, storagePath, buffer, buffer.length, {
                 "Content-Type": contentType,
             });
