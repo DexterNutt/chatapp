@@ -38,51 +38,43 @@ export class ChatService {
             throw new AppError("BAD_REQUEST", "Chat must have at least 2 participants.");
         }
 
-        try {
-            const existingChat = await this.findExistingChat(db, participantIds);
-            if (existingChat) {
-                throw new AppError("BAD_REQUEST", `Chat already exists.${existingChat.chatId}`);
-            }
+        const existingChat = await this.findExistingChat(db, participantIds);
 
-            return await this.createNewChat(db, request, participantIds, now);
-        } catch (error) {
-            console.error("Error in createChat:", error);
-            throw new AppError("BAD_REQUEST", "Failed to create chat.");
+        if (existingChat) {
+            throw new AppError("BAD_REQUEST", `Chat already exists: ${existingChat.chatId}`);
         }
+
+        return await this.createNewChat(db, request, participantIds, now);
     }
 
     private static async findExistingChat(db: NodePgDatabase, participantIds: string[]): Promise<Chat | null> {
         try {
-            const participantCount = participantIds.length;
-
             const potentialChats = await db
-                .select({ chatId: chatParticipants.chatId })
+                .select({
+                    chatId: chatParticipants.chatId,
+                    userIds: sql<
+                        Array<string>
+                    >`ARRAY_AGG(${chatParticipants.userId} ORDER BY ${chatParticipants.userId})`,
+                })
                 .from(chatParticipants)
                 .where(inArray(chatParticipants.userId, participantIds))
                 .groupBy(chatParticipants.chatId)
-                .having(sql`count(${chatParticipants.userId}) = ${participantCount}`);
+                .having(sql`count(${chatParticipants.userId}) = ${participantIds.length}`);
 
-            for (const { chatId } of potentialChats) {
-                const participants = await db
-                    .select({
-                        userId: chatParticipants.userId,
-                    })
-                    .from(chatParticipants)
-                    .where(eq(chatParticipants.chatId, chatId));
-
-                const chatParticipantIds = participants.map((p) => p.userId);
+            if (potentialChats.length > 0) {
+                const chatParticipantIds = new Set(potentialChats[0].userIds);
+                const inputParticipantIds = new Set(participantIds);
 
                 if (
-                    chatParticipantIds.length === participantIds.length &&
-                    chatParticipantIds.every((id) => participantIds.includes(id))
+                    chatParticipantIds.size === inputParticipantIds.size &&
+                    [...chatParticipantIds].every((id) => inputParticipantIds.has(id))
                 ) {
-                    return await this.fetchChatDetails(db, chatId);
+                    return await this.fetchChatDetails(db, potentialChats[0].chatId);
                 }
             }
 
             return null;
         } catch (error) {
-            console.error("Error finding existing chat:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to find existing chat.");
         }
     }
@@ -116,7 +108,6 @@ export class ChatService {
                 participants: participantIds,
             };
         } catch (error) {
-            console.error("Error fetching chat details:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch chat details.");
         }
     }
@@ -129,7 +120,6 @@ export class ChatService {
                 .where(eq(chatParticipants.chatId, chatId));
             return participants.map((p) => p.userId);
         } catch (error) {
-            console.error("Error fetching participants:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch participants.");
         }
     }
@@ -190,7 +180,6 @@ export class ChatService {
                 };
             });
         } catch (error) {
-            console.error("Error creating new chat:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to create new chat.");
         }
     }
@@ -273,7 +262,6 @@ export class ChatService {
                 return mappedMessage;
             });
         } catch (error) {
-            console.error("Error sending message:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to send message.");
         }
     }
@@ -321,7 +309,6 @@ export class ChatService {
                 storagePath,
             };
         } catch (error) {
-            console.error("Error uploading attachment:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to upload attachment.");
         }
     }
@@ -331,7 +318,6 @@ export class ChatService {
             const url = await minioClient.presignedGetObject(BUCKET_NAME, storagePath, 24 * 60 * 60);
             return url;
         } catch (error) {
-            console.error("Error generating attachment URL:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to generate attachment URL.");
         }
     }
@@ -358,7 +344,6 @@ export class ChatService {
 
             return attachments;
         } catch (error) {
-            console.error("Error fetching message attachments:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch message attachments.");
         }
     }
@@ -388,7 +373,6 @@ export class ChatService {
 
             return chatMessages;
         } catch (error) {
-            console.error("Error fetching messages:", error);
             throw new AppError("INTERNAL_SERVER_ERROR", "Failed to fetch messages.");
         }
     }
