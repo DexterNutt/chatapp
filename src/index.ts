@@ -5,7 +5,6 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { errorWrapperSchema } from "./lib/zod";
 import { createBunWebSocket } from "hono/bun";
-import type { WSEvents } from "hono/ws";
 
 export const app = new Hono();
 
