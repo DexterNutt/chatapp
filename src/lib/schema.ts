@@ -47,6 +47,7 @@ export const chatParticipants = pgTable(
             .references(() => users.userId, { onDelete: "cascade" }),
         roles: chatParticipantRoles("roles").array().notNull(),
         joinedAt: timestamp("joined_at").notNull().defaultNow(),
+        lastActivity: timestamp("last_activity").defaultNow().notNull(),
     },
     (t) => ({
         pk: primaryKey({ columns: [t.chatId, t.userId] }),
@@ -58,10 +59,11 @@ export const messages = pgTable("messages", {
     chatId: uuid("chat_id")
         .notNull()
         .references(() => chats.chatId, { onDelete: "cascade" }),
-    userId: uuid("user_id")
+    senderId: uuid("user_id")
         .notNull()
         .references(() => users.userId, { onDelete: "set null" }),
     textContent: text("text_content"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const messageAttachments = pgTable("message_attachments", {
