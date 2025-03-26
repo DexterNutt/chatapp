@@ -2,18 +2,28 @@ import { Hono, type Context } from "hono";
 import { describeRoute } from "hono-openapi";
 import { type CtxEnv, inputValidator, routeResponses, validatedJson } from "../../lib/hono";
 import { ChatService } from "./service";
-import { createChatSchema, sendMessageSchema, chatSchema, messageSchema } from "./model";
+import {
+    createChatSchema,
+    sendMessageSchema,
+    chatSchema,
+    messageSchema,
+    fetchChatsResponseSchema,
+    fetchChatsRequestSchema,
+    fetchMessagesResponseSchema,
+    fetchMessagesRequestSchema,
+} from "./model";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
 import { AuthService, type AuthContext } from "../auth/service";
-import type { WSEvents, WSContext } from "hono/ws";
+import type { WSEvents } from "hono/ws";
+import { parseBody } from "hono/utils/body";
 
 export const chatRouter = new Hono<CtxEnv>();
 export const clients = new Map<string, ServerWebSocket<WebSocketData>>();
 
 interface WebSocketData {
     userId: string;
-    content: string;
+    textContent: string;
 }
 
 const { upgradeWebSocket } = createBunWebSocket<ServerWebSocket<WebSocketData>>();
@@ -42,15 +52,72 @@ chatRouter.post(
     async (c) => validatedJson(c, messageSchema, await ChatService.sendMessage(c.var.db, c.req.valid("json")))
 );
 
+chatRouter.post(
+    "/fetch-chats",
+    inputValidator("json", fetchChatsRequestSchema),
+    describeRoute({
+        operationId: "fetchChats",
+        responses: routeResponses(fetchChatsResponseSchema),
+        tags,
+    }),
+    async (c) => validatedJson(c, fetchChatsResponseSchema, await ChatService.fetchChats(c.var.db, c.req.valid("json")))
+);
+
 chatRouter.get(
-    "/newChat",
+    "/fetch-messages",
+    inputValidator("query", fetchMessagesRequestSchema),
+    describeRoute({
+        operationId: "fetchMessages",
+        responses: routeResponses(fetchMessagesResponseSchema),
+        tags,
+    }),
+    async (c) =>
+        validatedJson(c, fetchMessagesResponseSchema, await ChatService.fetchMessages(c.var.db, c.req.valid("query")))
+);
+
+chatRouter.get(
+    "/fetch-unread-messages",
+    inputValidator("query", fetchMessagesRequestSchema),
+    describeRoute({
+        operationId: "fetchMessages",
+        responses: routeResponses(fetchMessagesResponseSchema),
+        tags,
+    }),
+    async (c) =>
+        validatedJson(
+            c,
+            fetchMessagesResponseSchema,
+            await ChatService.fetchMessages(c.var.db, c.req.valid("query"), true) //? Just true means we set the param to fetchUnread: true
+        )
+);
+
+chatRouter.get(
+    "/fetch-preview-message",
+    inputValidator("query", fetchMessagesRequestSchema),
+    describeRoute({
+        operationId: "fetchMessages",
+        responses: routeResponses(fetchMessagesResponseSchema),
+        tags,
+    }),
+    async (c) =>
+        validatedJson(
+            c,
+            fetchMessagesResponseSchema,
+            await ChatService.fetchMessages(c.var.db, c.req.valid("query"), false, true) //? false, true means we set the param to fetchUnread: false, fetchPreview: true
+        )
+);
+
+chatRouter.get(
+    "/chat-socket",
     upgradeWebSocket(async (c): Promise<WSEvents<ServerWebSocket<WebSocketData>>> => {
         const url = new URL(c.req.url);
         const sessionToken = url.searchParams.get("sessionToken");
+        const chatId = url.searchParams.get("chatId");
+
         console.log("WebSocket connection initiated with session token:", sessionToken);
 
-        if (!sessionToken) {
-            throw new Error("Unauthorized: Missing session token");
+        if (!sessionToken || !chatId) {
+            throw new Error("Unauthorized: Missing session token or chatID");
         }
 
         let authContext: AuthContext;
@@ -63,8 +130,9 @@ chatRouter.get(
         }
 
         const userId = authContext.user.id;
+
         return {
-            onOpen: (_, ws) => {
+            onOpen: async (_, ws) => {
                 if (!ws.raw) {
                     console.error("WebSocket raw data is undefined");
                     return;
@@ -72,7 +140,7 @@ chatRouter.get(
 
                 clients.set(userId, ws.raw);
 
-                console.log(`WebSocket connection opened for user: ${userId}`);
+                console.log(`WebSocket connection opened for user: ${userId} in chat: ${chatId}`);
 
                 ws.send(
                     JSON.stringify({
@@ -80,11 +148,20 @@ chatRouter.get(
                         userId: userId,
                     })
                 );
+
+                const result = await ChatService.fetchMessages(c.var.db, { chatId, userId }, true);
+
+                ws.send(
+                    JSON.stringify({
+                        type: "unread_messages",
+                        result: result,
+                    })
+                );
             },
             onMessage: async (event, ws) => {
                 try {
                     const data = JSON.parse(event.data.toString());
-                    console.log(`Message from user ${userId}:`, data.content);
+                    console.log(`Message from user ${userId}:`, data.textContent);
 
                     data.userId = userId;
 
