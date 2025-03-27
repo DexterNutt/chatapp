@@ -14,7 +14,6 @@ import {
     type FetchChatsResponse,
     type FetchMessagesRequest,
     type FetchChatsRequest,
-    type ChatParticipant,
     messageAttachmentSchema,
     type UploadAttachmentRequest,
     type FetchChatDetailsRequest,

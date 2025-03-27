@@ -53,15 +53,16 @@ chatRouter.post(
     async (c) => validatedJson(c, messageSchema, await ChatService.sendMessage(c.var.db, c.req.valid("json")))
 );
 
-chatRouter.post(
+chatRouter.get(
     "/fetch-chats",
-    inputValidator("json", fetchChatsRequestSchema),
+    inputValidator("query", fetchChatsRequestSchema),
     describeRoute({
         operationId: "fetchChats",
         responses: routeResponses(fetchChatsResponseSchema),
         tags,
     }),
-    async (c) => validatedJson(c, fetchChatsResponseSchema, await ChatService.fetchChats(c.var.db, c.req.valid("json")))
+    async (c) =>
+        validatedJson(c, fetchChatsResponseSchema, await ChatService.fetchChats(c.var.db, c.req.valid("query")))
 );
 
 chatRouter.get(
