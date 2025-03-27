@@ -301,7 +301,9 @@ export class ChatService {
         const chat = result[0];
 
         const fetchedMessages = await this.fetchMessages(db, { chatId, userId }).then((res) => res.messages);
-        const participantIds = await this.fetchParticipants(db, chat.chatId);
+        const participantsArray = await this.fetchParticipants(db, { chatId });
+
+        const participantIds = participantsArray.participants.map((p) => p.participantId);
 
         return {
             chatId: chat.chatId,
@@ -314,15 +316,30 @@ export class ChatService {
         };
     }
 
-    private static async fetchParticipants(
+    static async fetchParticipants(
         db: NodePgDatabase,
-        chatId: Chat["chatId"]
-    ): Promise<ChatParticipant["participantId"][]> {
+        request: FetchChatParticipantsRequest
+    ): Promise<FetchChatParticipantsResponse> {
         const participants = await db
-            .select({ userId: chatParticipants.userId })
+            .select({
+                participantId: chatParticipants.userId,
+                chatId: chatParticipants.chatId,
+                joinedAt: chatParticipants.joinedAt,
+                roles: chatParticipants.roles,
+            })
             .from(chatParticipants)
-            .where(eq(chatParticipants.chatId, chatId));
-        return participants.map((p) => p.userId);
+            .where(eq(chatParticipants.chatId, request.chatId));
+
+        const participantsMap = participants.map((p) => ({
+            participantId: p.participantId,
+            chatId: p.chatId,
+            joinedAt: p.joinedAt,
+            roles: p.roles[0],
+        }));
+
+        return {
+            participants: participantsMap,
+        };
     }
 
     static async fetchMessages(
@@ -426,38 +443,21 @@ export class ChatService {
 
         const chatDetails = await Promise.all(
             chatRows.map(async (chatRow) => {
-                const [fetchedMessages, participantIds] = await Promise.all([
+                const [fetchedMessages, participantsResponse] = await Promise.all([
                     this.fetchMessages(db, { chatId: chatRow.chatId, userId }).then((res) => res.messages),
-                    this.fetchParticipants(db, chatRow.chatId),
+                    this.fetchParticipants(db, { chatId: chatRow.chatId }),
                 ]);
 
                 return {
                     ...chatRow,
                     messages: fetchedMessages,
-                    participants: participantIds,
+                    participants: participantsResponse.participants.map((p) => p.participantId),
                 };
             })
         );
 
         return {
             chats: chatDetails,
-        };
-    }
-
-    static async fetchChatParticipants(
-        db: NodePgDatabase,
-        request: FetchChatParticipantsRequest
-    ): Promise<FetchChatParticipantsResponse> {
-        const { chatId } = request;
-        const participants = await db.select().from(chatParticipants).where(eq(chatParticipants.chatId, chatId));
-
-        return {
-            participants: participants.map((p) => ({
-                participantId: p.userId,
-                chatId: p.chatId,
-                joinedAt: p.joinedAt,
-                role: p.roles[0],
-            })),
         };
     }
 
@@ -473,7 +473,7 @@ export class ChatService {
     }
 
     private static async broadcastToParticipants(db: NodePgDatabase, chatId: Chat["chatId"], payload: any) {
-        const participants = await this.fetchChatParticipants(db, { chatId });
+        const participants = await this.fetchParticipants(db, { chatId });
         this.notifyParticipants(
             participants.participants.map((p) => p.participantId),
             payload

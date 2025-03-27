@@ -11,12 +11,13 @@ import {
     fetchChatsRequestSchema,
     fetchMessagesResponseSchema,
     fetchMessagesRequestSchema,
+    fetchChatParticipantsRequestSchema,
+    fetchChatParticipantsResponseSchema,
 } from "./model";
 import { createBunWebSocket } from "hono/bun";
 import type { ServerWebSocket } from "bun";
 import { AuthService, type AuthContext } from "../auth/service";
 import type { WSEvents } from "hono/ws";
-import { parseBody } from "hono/utils/body";
 
 export const chatRouter = new Hono<CtxEnv>();
 export const clients = new Map<string, ServerWebSocket<WebSocketData>>();
@@ -104,6 +105,22 @@ chatRouter.get(
             c,
             fetchMessagesResponseSchema,
             await ChatService.fetchMessages(c.var.db, c.req.valid("query"), false, true) //? false, true means we set the param to fetchUnread: false, fetchPreview: true
+        )
+);
+
+chatRouter.get(
+    "/fetch-chat-participants",
+    inputValidator("query", fetchChatParticipantsRequestSchema),
+    describeRoute({
+        operationId: "fetchChatParticipants",
+        responses: routeResponses(fetchChatParticipantsResponseSchema),
+        tags,
+    }),
+    async (c) =>
+        validatedJson(
+            c,
+            fetchChatParticipantsResponseSchema,
+            await ChatService.fetchParticipants(c.var.db, c.req.valid("query"))
         )
 );
 

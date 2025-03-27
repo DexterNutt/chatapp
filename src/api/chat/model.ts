@@ -123,7 +123,7 @@ export const chatParticipantSchema = z.object({
     participantId: z.string().uuid(),
     chatId: z.string().uuid(),
     joinedAt: z.coerce.date(),
-    role: z.enum(["admin", "member"]),
+    roles: z.enum(["admin", "member"]),
 });
 
 export type FetchChatParticipantsRequest = z.infer<typeof fetchChatParticipantsRequestSchema>;
