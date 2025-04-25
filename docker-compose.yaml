@@ -40,3 +40,40 @@ services:
       mc mb local/chat-attachments;
       mc policy set public local/chat-attachments;
       exit 0;"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chat-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      APP_PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: chatdb
+      DB_USER: postgres
+      DB_PASSWORD: chat-password
+
+    depends_on:
+      - postgres
+      - minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: nginx:latest
+    container_name: chat-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - app

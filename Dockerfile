@@ -3,7 +3,7 @@ FROM oven/bun:latest
 WORKDIR /build
 
 COPY package.json ./
-COPY bun.lockb ./
+COPY bun.lock ./
 COPY .npmrc* .
 
 COPY . .
