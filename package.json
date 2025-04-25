@@ -24,7 +24,7 @@
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
-    "manage": "bun run ./manage.ts db-migrate --force --quiet"
+    "manage": "bun run src/scripts/manage.ts db-migrate"
   },
   "devDependencies": {
     "@types/bun": "latest",
