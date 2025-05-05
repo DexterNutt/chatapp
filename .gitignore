@@ -7,3 +7,4 @@ isolated-data
 .env
 drizzle
 minio-data
+.github

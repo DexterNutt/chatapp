@@ -21,9 +21,12 @@ import {
 import { type AuthContext } from "../auth/service";
 import { AppError } from "../../lib/error";
 import { clients } from "./router";
-import { minioClient, BUCKET_NAME } from "../../lib/minio";
+// import { minioClient, BUCKET_NAME } from "../../lib/minio";
 import * as crypto from "crypto";
 import * as path from "path";
+import { BUCKET_NAME, s3Client } from "../../lib/s3";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export class ChatService {
     static async createChat(db: NodePgDatabase, chat: CreateChat): Promise<Chat> {
@@ -199,9 +202,16 @@ export class ChatService {
         }
 
         try {
-            await minioClient.putObject(BUCKET_NAME, storagePath, buffer, buffer.length, { "Content-Type": mimeType });
+            await s3Client.send(
+                new PutObjectCommand({
+                    Bucket: BUCKET_NAME,
+                    Key: storagePath,
+                    Body: buffer,
+                    ContentType: mimeType,
+                })
+            );
         } catch (error) {
-            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to upload file to storage.");
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to upload file to S3.");
         }
 
         const url = await this.getAttachmentUrl(storagePath);
@@ -219,8 +229,18 @@ export class ChatService {
     }
 
     static async getAttachmentUrl(storagePath: MessageAttachment["storagePath"]): Promise<MessageAttachment["url"]> {
-        const url = await minioClient.presignedGetObject(BUCKET_NAME, storagePath, 24 * 60 * 60);
-        return url;
+        try {
+            const command = new GetObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: storagePath,
+            });
+
+            const url = await getSignedUrl(s3Client, command, { expiresIn: 24 * 60 * 60 });
+
+            return url;
+        } catch (error) {
+            throw new AppError("INTERNAL_SERVER_ERROR", "Failed to generate pre-signed URL.");
+        }
     }
 
     static async fetchMessageAttachments(
