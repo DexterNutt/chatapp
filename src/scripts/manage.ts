@@ -2,43 +2,35 @@
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { config } from "dotenv";
 import commandLineArgs from "command-line-args";
 import { connectToPostgres } from "../lib/postgres";
 
-config();
-
-const args = commandLineArgs(
-    [
-        { name: "command", defaultOption: true },
-        { name: "force", type: Boolean, defaultValue: false },
-        { name: "quiet", type: Boolean, defaultValue: false },
-    ],
-    { partial: true }
-) as {
-    command: string;
-    force: boolean;
-    quiet: boolean;
+const DB_CONFIG = {
+    host: process.env.DB_HOST!,
+    port: parseInt(process.env.DB_PORT || "5432"),
+    user: process.env.DB_USER!,
+    password: process.env.DB_PASSWORD!,
+    database: process.env.DB_NAME!,
 };
 
-const dbUrlEnvKey = "DB_URL" as const;
-const dbUrl = process.env[dbUrlEnvKey];
+async function runMigrations() {
+    try {
+        const pool = await connectToPostgres();
+        const db = drizzle(pool);
 
-if (!dbUrl) {
-    throw new Error(`Database URL not provided in the ${dbUrlEnvKey} environment variable.`);
+        console.log("Starting migrations...");
+        await migrate(db, {
+            migrationsFolder: "drizzle",
+        });
+        console.log("Migrations completed successfully!");
+
+        await pool.end();
+    } catch (err) {
+        console.error("Migration failed:", err);
+        process.exit(1);
+    }
 }
 
-async function dbMigrate() {
-    const db = drizzle(await connectToPostgres());
-    await migrate(db, {
-        migrationsFolder: "drizzle",
-    });
-}
-
-if (args.command === "db-migrate") {
-    dbMigrate().catch(console.error);
-} else if (!args.quiet && args.command) {
-    console.log(`Unknown command: ${args.command}`);
-} else if (!args.command && !args.quiet) {
-    console.log("Usage: bun run ./migrate.ts db-migrate");
+if (process.argv.includes("db-migrate")) {
+    runMigrations();
 }

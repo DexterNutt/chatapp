@@ -26,7 +26,7 @@
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
-    "manage": "bun run src/scripts/manage.ts db-migrate"
+    "migrate": "bun run src/scripts/manage.ts db-migrate"
   },
   "devDependencies": {
     "@types/bun": "latest",
