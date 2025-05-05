@@ -32,8 +32,6 @@ services:
       DB_PASSWORD: chat-password
       AWS_REGION: eu-north-1
       S3_BUCKET_NAME: chat-attachments
-      AWS_ACCESS_KEY_ID: AKIAYS2NW3RPUE6BGQ4K
-      aws_secret_access_key: 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
 
     depends_on:
       - postgres
