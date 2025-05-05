@@ -1,8 +1,15 @@
 .svelte-kit
 .vscode
 env/
-dist
-node_modules
+dist/
+node_modules/
 .prettierrc
 buildspec.yml
 eslint.config.js
+nginx/
+.github/
+minio-data/
+Dockerfile.nginx
+*.log
+.env
+.env.*
