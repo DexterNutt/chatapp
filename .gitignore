@@ -8,3 +8,4 @@ isolated-data
 drizzle
 minio-data
 .github
+docker-compose.yaml
