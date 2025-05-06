@@ -7,5 +7,4 @@ isolated-data
 .env
 drizzle
 minio-data
-.github
 docker-compose.yaml

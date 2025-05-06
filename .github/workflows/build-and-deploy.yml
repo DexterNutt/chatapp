@@ -1,0 +1,77 @@
+name: Build and Deploy to ECR
+
+on:
+  push:
+    branches: [main]
+    workflow_dispatch:
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Extract environment variables
+        id: vars
+        run: |
+          echo "APP_NAME=$(echo ${{ secrets.APP_NAME }})" >> $GITHUB_OUTPUT
+          echo "ENVIRONMENT=$(echo ${{ secrets.ENVIRONMENT }})" >> $GITHUB_OUTPUT
+          echo "SHA_SHORT=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Build and push app image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-app-repo:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-app-repo:${{ steps.vars.outputs.SHA_SHORT }}
+
+      - name: Build and push nginx image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./nginx
+          file: ./nginx/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-nginx-repo:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-nginx-repo:${{ steps.vars.outputs.SHA_SHORT }}
+
+      - name: Force ECS service update
+        run: |
+          aws ecs update-service \
+            --cluster ${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-cluster \
+            --service ${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-service \
+            --force-new-deployment
+
+          aws ecs update-service \
+            --cluster ${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-cluster \
+            --service ${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-nginx-service \
+            --force-new-deployment
+
+      - name: Run migrations
+        run: |
+          aws ecs run-task \
+            --cluster ${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-cluster \
+            --launch-type EC2 \
+            --task-definition ${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-task-migrations \
+            --overrides '{
+              "containerOverrides": [{
+                "name": "${{ steps.vars.outputs.APP_NAME }}-${{ steps.vars.outputs.ENVIRONMENT }}-container-migrations"
+              }]
+            }'
