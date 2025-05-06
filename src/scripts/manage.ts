@@ -2,7 +2,6 @@
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import commandLineArgs from "command-line-args";
 import { connectToPostgres } from "../lib/postgres";
 
 const DB_CONFIG = {
